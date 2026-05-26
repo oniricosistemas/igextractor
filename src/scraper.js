@@ -1160,6 +1160,9 @@ async function runMediaDownload(outputDir, allPosts, limit, wantPhotos, wantReel
       if (isCarousel && !fs.existsSync(postDir)) fs.mkdirSync(postDir, { recursive: true });
       const postTs = getPostTimestamp(post) || 0;
 
+      let firstDownloadedPath = null;
+      let firstDownloadedUrl = null;
+
       for (let j = 0; j < items.length; j++) {
         const item = items[j];
         const isV = isReel(item);
@@ -1199,38 +1202,42 @@ async function runMediaDownload(outputDir, allPosts, limit, wantPhotos, wantReel
           : path.join(outputDir, `${tsPrefix}media_${result.photos + result.reels + 1}.${ext}`);
 
         dbg(`[media] post ${code} item ${j+1}: ts=${postTs} type=${isV?'reel':'photo'} url=${url.substring(0,80)} -> ${finalPath}`);
-         try {
-            await downloadFile(url, finalPath);
-            // Reconcile grid index robustly: try shortcode, then pk, then DOM shortcodes
-            let gridIndex = null;
-            try {
-              if (code && gridShortcodesIndexMap && typeof gridShortcodesIndexMap.get === 'function' && gridShortcodesIndexMap.has(code)) {
-                gridIndex = gridShortcodesIndexMap.get(code);
-              } else if (pk && gridPkIndexMap && typeof gridPkIndexMap.get === 'function' && gridPkIndexMap.has(String(pk))) {
-                gridIndex = gridPkIndexMap.get(String(pk));
-              } else if (domShortcodes && domShortcodes.length && code) {
-                const di = domShortcodes.indexOf(code);
-                if (di >= 0) gridIndex = di;
-              }
-            } catch (e) {
-              dbg('[media] grid index reconcile error:', e && e.message);
-            }
-            mediaMap.push({
-              filename: path.relative(outputDir, finalPath).replace(/\\/g, '/'),
-              shortcode: code || null,
-              ts: postTs || null,
-              type: isV ? 'reel' : 'photo',
-              url: url,
-              grid_index: gridIndex !== null && gridIndex !== undefined ? gridIndex : null,
-              feed_source: (gridIndex !== null && gridIndex !== undefined) ? 'grid' : 'feed'
-            });
-           if (!isV) { result.imageMap[code] = result.imageMap[code] || []; result.imageMap[code].push(filename); }
-           if (isV) result.reels++; else result.photos++;
-           dbg(`[media] OK ${isV ? 'reel' : 'photo'} saved to ${finalPath}`);
-         } catch (e) {
-           dbg('[media] FAILED to download', url, e.message);
-         }
+        try {
+          await downloadFile(url, finalPath);
+          if (firstDownloadedPath === null) { firstDownloadedPath = finalPath; firstDownloadedUrl = url; }
+          if (!isV) { result.imageMap[code] = result.imageMap[code] || []; result.imageMap[code].push(filename); }
+          if (isV) result.reels++; else result.photos++;
+          dbg(`[media] OK ${isV ? 'reel' : 'photo'} saved to ${finalPath}`);
+        } catch (e) {
+          dbg('[media] FAILED to download', url, e.message);
+        }
+      }
 
+      // One media_map entry per post (after all items downloaded)
+      if (firstDownloadedPath !== null) {
+        try {
+          let gridIndex = null;
+          if (code && gridShortcodesIndexMap && typeof gridShortcodesIndexMap.get === 'function' && gridShortcodesIndexMap.has(code)) {
+            gridIndex = gridShortcodesIndexMap.get(code);
+          } else if (pk && gridPkIndexMap && typeof gridPkIndexMap.get === 'function' && gridPkIndexMap.has(String(pk))) {
+            gridIndex = gridPkIndexMap.get(String(pk));
+          } else if (domShortcodes && domShortcodes.length && code) {
+            const di = domShortcodes.indexOf(code);
+            if (di >= 0) gridIndex = di;
+          }
+          mediaMap.push({
+            filename: path.relative(outputDir, firstDownloadedPath).replace(/\\/g, '/'),
+            shortcode: code || null,
+            ts: postTs || null,
+            type: postIsReel ? 'reel' : (isCarousel ? 'carousel' : 'photo'),
+            url: firstDownloadedUrl,
+            grid_index: gridIndex !== null && gridIndex !== undefined ? gridIndex : null,
+            feed_source: (gridIndex !== null && gridIndex !== undefined) ? 'grid' : 'feed',
+            ...(isCarousel ? { item_count: items.length } : {})
+          });
+        } catch (e) {
+          dbg('[media] media_map entry failed for post', code, e && e.message);
+        }
       }
       if (bar && typeof bar.tick === 'function') {
         const done = (wantPhotos ? result.photos : 0) + (wantReels ? result.reels : 0);
