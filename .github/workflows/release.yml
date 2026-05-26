@@ -81,7 +81,7 @@ jobs:
           echo "Chromium dir: $CHROME_DIR"
 
       - name: Install pkg
-        run: npm install -g pkg
+        run: npm install -g @yao-pkg/pkg
 
       - name: Compile binary
         run: pkg bin/igextractor.js --targets ${{ matrix.pkg_target }} --output dist/${{ matrix.binary }} --compress GZip
