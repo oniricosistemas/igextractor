@@ -552,8 +552,9 @@ async function navigateAndCapture(username, options = {}) {
       const title = document.title;
       const html = document.documentElement.innerHTML;
       const isLoginUrl = url.includes('/accounts/login');
-      const isLoginTitle = /Log in/i.test(title);
-      const hasLoginForm = html.includes('id="username"') || (html.includes('login') && html.includes('<form'));
+      const isLoginTitle = title === 'Log in • Instagram' || title === 'Instagram - Log in';
+      // Only trigger on actual login form presence (input with name="username" inside a form)
+      const hasLoginForm = document.querySelector('form input[name="username"]') !== null;
       return (isLoginUrl || isLoginTitle || hasLoginForm) ? { url, title, html } : null;
     }, username);
 
