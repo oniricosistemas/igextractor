@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IGExtractor — Full Instagram Profile Backup</title>
+  <meta name="description" content="Download photos, reels, stories, comments and followers from any public Instagram profile. One command, everything saved." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --brand-1: #F58529;
+      --brand-2: #DD2A7B;
+      --brand-3: #8134AF;
+      --brand-4: #515BD4;
+      --bg:      #0d0d0d;
+      --bg2:     #141414;
+      --bg3:     #1a1a1a;
+      --border:  #2a2a2a;
+      --text:    #f0f0f0;
+      --muted:   #888;
+      --radius:  12px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Gradient text ── */
+    .grad {
+      background: linear-gradient(90deg, var(--brand-1), var(--brand-2), var(--brand-3), var(--brand-4));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    /* ── Navbar ── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2rem;
+      height: 60px;
+      background: rgba(13,13,13,0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-logo {
+      font-weight: 800;
+      font-size: 1.1rem;
+      letter-spacing: -0.5px;
+    }
+
+    .nav-right {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .lang-toggle {
+      display: flex;
+      gap: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .lang-btn {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .lang-btn.active {
+      background: var(--border);
+      color: var(--text);
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.6rem 1.4rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      text-decoration: none;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.2s, transform 0.15s;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .btn:hover { opacity: 0.88; transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--brand-2), var(--brand-3));
+      color: #fff;
+    }
+
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .btn-lg {
+      padding: 0.85rem 2rem;
+      font-size: 1rem;
+      border-radius: 10px;
+    }
+
+    /* ── Hero ── */
+    .hero {
+      text-align: center;
+      padding: 7rem 1.5rem 5rem;
+      max-width: 780px;
+      margin: 0 auto;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.3rem 1rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-bottom: 2rem;
+      background: var(--bg2);
+    }
+
+    .hero h1 {
+      font-size: clamp(2.2rem, 6vw, 3.8rem);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -1.5px;
+      margin-bottom: 1.25rem;
+    }
+
+    .hero p {
+      font-size: clamp(1rem, 2.5vw, 1.2rem);
+      color: var(--muted);
+      max-width: 560px;
+      margin: 0 auto 2.5rem;
+    }
+
+    .hero-ctas {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    /* ── Problem strip ── */
+    .problem {
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 1.5rem 1.5rem;
+      text-align: center;
+    }
+
+    .problem p {
+      font-size: 1rem;
+      color: var(--muted);
+      max-width: 640px;
+      margin: 0 auto;
+    }
+
+    .problem strong { color: var(--text); }
+
+    /* ── Terminal preview ── */
+    .terminal-wrap {
+      max-width: 680px;
+      margin: 4rem auto 0;
+      padding: 0 1.5rem;
+    }
+
+    .terminal {
+      background: #0a0a0a;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .terminal-bar {
+      background: #1c1c1c;
+      padding: 0.6rem 1rem;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot-r { background: #ff5f57; }
+    .dot-y { background: #febc2e; }
+    .dot-g { background: #28c840; }
+
+    .terminal-body {
+      padding: 1.25rem 1.5rem;
+      font-family: 'Courier New', monospace;
+      font-size: 0.82rem;
+      line-height: 1.9;
+    }
+
+    .t-dim   { color: #555; }
+    .t-green { color: #3ecf8e; }
+    .t-pink  { color: #DD2A7B; }
+    .t-gold  { color: #F5A623; }
+    .t-blue  { color: #515BD4; }
+    .t-white { color: #e0e0e0; }
+
+    /* ── Features ── */
+    .features {
+      max-width: 960px;
+      margin: 5rem auto;
+      padding: 0 1.5rem;
+    }
+
+    .section-label {
+      text-align: center;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    .section-title {
+      text-align: center;
+      font-size: clamp(1.6rem, 4vw, 2.2rem);
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 3rem;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.25rem;
+    }
+
+    .feature-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      transition: border-color 0.2s;
+    }
+
+    .feature-card:hover { border-color: #444; }
+
+    .feature-icon {
+      font-size: 1.6rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .feature-card h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 0.4rem;
+    }
+
+    .feature-card p {
+      font-size: 0.875rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    /* ── Pricing ── */
+    .pricing {
+      max-width: 760px;
+      margin: 0 auto 5rem;
+      padding: 0 1.5rem;
+    }
+
+    .pricing-table {
+      width: 100%;
+      border-collapse: collapse;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .pricing-table th {
+      background: var(--bg2);
+      padding: 1rem 1.5rem;
+      text-align: left;
+      font-size: 0.85rem;
+      font-weight: 700;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .pricing-table th:not(:first-child) { text-align: center; }
+
+    .pricing-table th.col-pro {
+      background: linear-gradient(135deg, rgba(221,42,123,0.15), rgba(129,52,175,0.15));
+      color: #e878b8;
+    }
+
+    .pricing-table td {
+      padding: 0.85rem 1.5rem;
+      font-size: 0.9rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+
+    .pricing-table tr:last-child td { border-bottom: none; }
+    .pricing-table td:not(:first-child) { text-align: center; }
+
+    .pricing-table td.col-pro {
+      background: rgba(221,42,123,0.04);
+    }
+
+    .check { color: #3ecf8e; font-size: 1rem; }
+    .cross { color: #555; font-size: 1rem; }
+
+    .price-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #F5A623;
+    }
+
+    /* ── CTA final ── */
+    .cta-section {
+      text-align: center;
+      padding: 5rem 1.5rem;
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+    }
+
+    .cta-section h2 {
+      font-size: clamp(1.8rem, 4vw, 2.6rem);
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 1rem;
+    }
+
+    .cta-section p {
+      color: var(--muted);
+      max-width: 480px;
+      margin: 0 auto 2rem;
+    }
+
+    .cta-btns {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    /* ── Footer ── */
+    footer {
+      text-align: center;
+      padding: 2rem 1.5rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    footer a { color: var(--muted); text-decoration: underline; }
+
+    /* ── Responsive ── */
+    @media (max-width: 600px) {
+      nav { padding: 0 1rem; }
+      .hero-ctas { flex-direction: column; align-items: center; }
+      .cta-btns  { flex-direction: column; align-items: center; }
+      .pricing-table th, .pricing-table td { padding: 0.7rem 0.75rem; font-size: 0.82rem; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Navbar ──────────────────────────────────────────────────── -->
+<nav>
+  <span class="nav-logo"><span class="grad">IGExtractor</span></span>
+  <div class="nav-right">
+    <div class="lang-toggle">
+      <button class="lang-btn active" onclick="setLang('en')" id="btn-en">EN</button>
+      <button class="lang-btn" onclick="setLang('es')" id="btn-es">ES</button>
+    </div>
+    <a href="https://cafecito.app/igextractor" target="_blank" class="btn btn-primary" id="nav-cta">☕ Buy Pro</a>
+  </div>
+</nav>
+
+<!-- ── Hero ────────────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="hero-badge">
+    <span>⚡</span>
+    <span data-t="badge">CLI tool for Windows · macOS · Linux</span>
+  </div>
+  <h1 data-t="h1a">Back up any Instagram<br><span class="grad" data-t="h1b">profile in minutes</span></h1>
+  <p data-t="hero-sub">Photos, reels, stories, captions, comments and followers — all at once. No link-by-link nonsense.</p>
+  <div class="hero-ctas">
+    <a href="https://github.com/oniricosistemas/igextractor/releases" target="_blank" class="btn btn-primary btn-lg" data-t="cta-download">⬇ Download Free</a>
+    <a href="https://cafecito.app/igextractor" target="_blank" class="btn btn-outline btn-lg" data-t="cta-pro">☕ Get Pro — buy me a coffee</a>
+  </div>
+</section>
+
+<!-- ── Terminal preview ─────────────────────────────────────────── -->
+<div class="terminal-wrap">
+  <div class="terminal">
+    <div class="terminal-bar">
+      <div class="dot dot-r"></div>
+      <div class="dot dot-y"></div>
+      <div class="dot dot-g"></div>
+    </div>
+    <div class="terminal-body">
+      <span class="t-dim">$</span> <span class="t-white">igextractor</span><br>
+      <span class="t-dim">  ──────────── IGExtractor v0.5 ────────────</span><br><br>
+      <span class="t-dim">  Username:</span> <span class="t-white">nasa</span><br>
+      <span class="t-dim">  Download:</span> <span class="t-white">Photos + Reels, Stories, Comments, Followers</span><br>
+      <span class="t-dim">  Limit:</span>    <span class="t-white">0 (unlimited)</span><br><br>
+      <span class="t-green">  ✓ Profile @nasa found — 3,124 posts · 98.4M followers</span><br><br>
+      <span class="t-pink">  ████████████████████░░░░  82%</span> <span class="t-dim">│ 82/100 │ reel</span><br>
+      <span class="t-gold">  ██████████████████████████ 100%</span> <span class="t-dim">│ 5/5 │ comentarios</span><br><br>
+      <span class="t-green">  ✓ Done! Files saved in: ./ig_nasa</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── Problem strip ────────────────────────────────────────────── -->
+<div class="problem" style="margin-top:4rem">
+  <p data-t="problem">
+    <strong data-t="problem-strong">Every other downloader makes you paste links one by one.</strong>
+    <span data-t="problem-rest"> IGExtractor grabs the entire profile — photos, reels, stories, comments and follower lists — with a single command.</span>
+  </p>
+</div>
+
+<!-- ── Features ────────────────────────────────────────────────── -->
+<section class="features">
+  <p class="section-label" data-t="features-label">Features</p>
+  <h2 class="section-title" data-t="features-title">Everything you need to back up a profile</h2>
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon">📥</div>
+      <h3 data-t="f1-title">Full profile backup</h3>
+      <p data-t="f1-desc">Photos, reels and stories downloaded automatically. Carousels saved in their own folder.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">💬</div>
+      <h3 data-t="f2-title">Comments export</h3>
+      <p data-t="f2-desc">All comments from any post exported to JSON. Ready to analyze, search or archive.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">👥</div>
+      <h3 data-t="f3-title">Followers & following</h3>
+      <p data-t="f3-desc">Export full follower and following lists with username, name and verification status.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📝</div>
+      <h3 data-t="f4-title">Captions & metadata</h3>
+      <p data-t="f4-desc">All post captions saved to a single JSON file. Timestamps, shortcodes and post types included.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">⚡</div>
+      <h3 data-t="f5-title">Fast & lightweight</h3>
+      <p data-t="f5-desc">CLI tool, no subscription, no browser extension. Runs on Windows, macOS and Linux.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔒</div>
+      <h3 data-t="f6-title">Your data stays local</h3>
+      <p data-t="f6-desc">Everything is saved directly to your machine. No cloud upload, no third-party storage.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── Pricing ──────────────────────────────────────────────────── -->
+<section class="pricing">
+  <p class="section-label" data-t="pricing-label">Pricing</p>
+  <h2 class="section-title" data-t="pricing-title">Simple, honest pricing</h2>
+  <table class="pricing-table">
+    <thead>
+      <tr>
+        <th data-t="th-feature">Feature</th>
+        <th data-t="th-free">Free</th>
+        <th class="col-pro">Pro ☕</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td data-t="row-photos">Photos &amp; Reels</td>
+        <td><span data-t="limit-5">5 max</span></td>
+        <td class="col-pro"><span class="check">✓</span> <span data-t="unlimited">Unlimited</span></td>
+      </tr>
+      <tr>
+        <td data-t="row-captions">Captions</td>
+        <td><span class="check">✓</span></td>
+        <td class="col-pro"><span class="check">✓</span></td>
+      </tr>
+      <tr>
+        <td data-t="row-stories">Stories</td>
+        <td><span class="cross">✗</span></td>
+        <td class="col-pro"><span class="check">✓</span></td>
+      </tr>
+      <tr>
+        <td data-t="row-comments">Comments</td>
+        <td><span class="cross">✗</span></td>
+        <td class="col-pro"><span class="check">✓</span></td>
+      </tr>
+      <tr>
+        <td data-t="row-followers">Followers &amp; Following</td>
+        <td><span class="cross">✗</span></td>
+        <td class="col-pro"><span class="check">✓</span></td>
+      </tr>
+      <tr>
+        <td data-t="row-price">Price</td>
+        <td><span data-t="free-word">Free</span></td>
+        <td class="col-pro"><span class="price-tag">☕ <span data-t="price-val">a coffee</span></span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div style="text-align:center; margin-top: 2rem;">
+    <a href="https://cafecito.app/igextractor" target="_blank" class="btn btn-primary btn-lg" data-t="cta-pro-table">☕ Get Pro — buy me a coffee</a>
+    <p style="margin-top:1rem; font-size:0.8rem; color:var(--muted)" data-t="pro-note">After payment, you'll receive your API key by email within a few hours.</p>
+  </div>
+</section>
+
+<!-- ── Final CTA ────────────────────────────────────────────────── -->
+<section class="cta-section">
+  <h2 data-t="cta-title">Ready to save everything?</h2>
+  <p data-t="cta-sub">Download IGExtractor for free and upgrade when you need the full power.</p>
+  <div class="cta-btns">
+    <a href="https://github.com/oniricosistemas/igextractor/releases" target="_blank" class="btn btn-primary btn-lg" data-t="cta-download">⬇ Download Free</a>
+    <a href="https://cafecito.app/igextractor" target="_blank" class="btn btn-outline btn-lg" data-t="cta-pro">☕ Get Pro</a>
+  </div>
+</section>
+
+<!-- ── Footer ───────────────────────────────────────────────────── -->
+<footer>
+  <p data-t="footer-disc">IGExtractor is not affiliated with or endorsed by Instagram or Meta.</p>
+  <p style="margin-top:0.4rem">
+    <a href="https://github.com/oniricosistemas/igextractor" target="_blank">GitHub</a>
+    &nbsp;·&nbsp;
+    <a href="https://cafecito.app/igextractor" target="_blank" data-t="footer-pro">Get Pro</a>
+  </p>
+</footer>
+
+<!-- ── i18n ─────────────────────────────────────────────────────── -->
+<script>
+const STRINGS = {
+  en: {
+    'badge':          'CLI tool for Windows · macOS · Linux',
+    'h1a':            'Back up any Instagram',
+    'h1b':            'profile in minutes',
+    'hero-sub':       'Photos, reels, stories, captions, comments and followers — all at once. No link-by-link nonsense.',
+    'cta-download':   '⬇ Download Free',
+    'cta-pro':        '☕ Get Pro — buy me a coffee',
+    'nav-cta':        '☕ Buy Pro',
+    'problem-strong': 'Every other downloader makes you paste links one by one.',
+    'problem-rest':   ' IGExtractor grabs the entire profile — photos, reels, stories, comments and follower lists — with a single command.',
+    'features-label': 'Features',
+    'features-title': 'Everything you need to back up a profile',
+    'f1-title': 'Full profile backup',
+    'f1-desc':  'Photos, reels and stories downloaded automatically. Carousels saved in their own folder.',
+    'f2-title': 'Comments export',
+    'f2-desc':  'All comments from any post exported to JSON. Ready to analyze, search or archive.',
+    'f3-title': 'Followers & following',
+    'f3-desc':  'Export full follower and following lists with username, name and verification status.',
+    'f4-title': 'Captions & metadata',
+    'f4-desc':  'All post captions saved to a single JSON file. Timestamps, shortcodes and post types included.',
+    'f5-title': 'Fast & lightweight',
+    'f5-desc':  'CLI tool, no subscription, no browser extension. Runs on Windows, macOS and Linux.',
+    'f6-title': 'Your data stays local',
+    'f6-desc':  'Everything is saved directly to your machine. No cloud upload, no third-party storage.',
+    'pricing-label': 'Pricing',
+    'pricing-title': 'Simple, honest pricing',
+    'th-feature':  'Feature',
+    'th-free':     'Free',
+    'row-photos':  'Photos & Reels',
+    'limit-5':     '5 max',
+    'unlimited':   'Unlimited',
+    'row-captions':'Captions',
+    'row-stories': 'Stories',
+    'row-comments':'Comments',
+    'row-followers':'Followers & Following',
+    'row-price':   'Price',
+    'free-word':   'Free',
+    'price-val':   'a coffee',
+    'cta-pro-table':'☕ Get Pro — buy me a coffee',
+    'pro-note':    'After payment, you\'ll receive your API key by email within a few hours.',
+    'cta-title':   'Ready to save everything?',
+    'cta-sub':     'Download IGExtractor for free and upgrade when you need the full power.',
+    'footer-disc': 'IGExtractor is not affiliated with or endorsed by Instagram or Meta.',
+    'footer-pro':  'Get Pro',
+  },
+  es: {
+    'badge':          'Herramienta CLI para Windows · macOS · Linux',
+    'h1a':            'Guardá cualquier perfil de Instagram',
+    'h1b':            'en minutos',
+    'hero-sub':       'Fotos, reels, stories, textos, comentarios y seguidores — todo de una sola vez. Sin pegar links uno por uno.',
+    'cta-download':   '⬇ Descargar gratis',
+    'cta-pro':        '☕ Obtener Pro — invitame un café',
+    'nav-cta':        '☕ Comprar Pro',
+    'problem-strong': 'Todas las otras herramientas te hacen pegar los links uno por uno.',
+    'problem-rest':   ' IGExtractor descarga el perfil completo — fotos, reels, stories, comentarios y seguidores — con un solo comando.',
+    'features-label': 'Funciones',
+    'features-title': 'Todo lo que necesitás para hacer un backup de un perfil',
+    'f1-title': 'Backup completo del perfil',
+    'f1-desc':  'Fotos, reels y stories descargados automáticamente. Los carousels se guardan en su propia carpeta.',
+    'f2-title': 'Exportación de comentarios',
+    'f2-desc':  'Todos los comentarios de cualquier post exportados a JSON. Listos para analizar, buscar o archivar.',
+    'f3-title': 'Seguidores y seguidos',
+    'f3-desc':  'Exportá la lista completa de seguidores y seguidos con usuario, nombre y estado de verificación.',
+    'f4-title': 'Textos y metadatos',
+    'f4-desc':  'Todos los textos de las publicaciones guardados en un solo JSON. Incluye fechas, shortcodes y tipos de post.',
+    'f5-title': 'Rápido y liviano',
+    'f5-desc':  'Herramienta CLI, sin suscripción, sin extensión de navegador. Funciona en Windows, macOS y Linux.',
+    'f6-title': 'Tus datos quedan en tu máquina',
+    'f6-desc':  'Todo se guarda directamente en tu computadora. Sin subida a la nube ni almacenamiento de terceros.',
+    'pricing-label': 'Precios',
+    'pricing-title': 'Precios simples y honestos',
+    'th-feature':  'Función',
+    'th-free':     'Gratis',
+    'row-photos':  'Fotos y Reels',
+    'limit-5':     'máx. 5',
+    'unlimited':   'Ilimitado',
+    'row-captions':'Textos de publicaciones',
+    'row-stories': 'Stories',
+    'row-comments':'Comentarios',
+    'row-followers':'Seguidores y Seguidos',
+    'row-price':   'Precio',
+    'free-word':   'Gratis',
+    'price-val':   'un café',
+    'cta-pro-table':'☕ Obtener Pro — invitame un café',
+    'pro-note':    'Después del pago recibís tu API key por email en pocas horas.',
+    'cta-title':   '¿Listo para guardar todo?',
+    'cta-sub':     'Descargá IGExtractor gratis y actualizá cuando necesites el poder completo.',
+    'footer-disc': 'IGExtractor no está afiliado ni es avalado por Instagram o Meta.',
+    'footer-pro':  'Obtener Pro',
+  }
+};
+
+let currentLang = (navigator.language || 'en').startsWith('es') ? 'es' : 'en';
+
+function setLang(lang) {
+  currentLang = lang;
+  const s = STRINGS[lang];
+  document.querySelectorAll('[data-t]').forEach(el => {
+    const key = el.getAttribute('data-t');
+    if (s[key] !== undefined) el.textContent = s[key];
+  });
+  document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+  document.getElementById('btn-es').classList.toggle('active', lang === 'es');
+  document.documentElement.lang = lang;
+}
+
+setLang(currentLang);
+</script>
+
+</body>
+</html>
