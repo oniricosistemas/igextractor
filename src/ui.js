@@ -164,18 +164,27 @@ function infoBox(content, type = 'info') {
 // ─── Determinate progress bar ─────────────────────────────────────────────────
 function createProgressBar(label, colorKey = 'cyan') {
   const colorFn = C[colorKey] || C.cyan;
-  return new cliProgress.SingleBar({
+  const bar = new cliProgress.SingleBar({
     format:
       '  ' + colorFn('{bar}') + ' ' +
       C.white('{percentage}%') + C.dim(' │ ') +
-      C.white('{value}') + C.dim('/') + C.white('{total}') + C.dim(' Posts │ ') +
-      C.gray(label + ': {filename}'),
+      C.white('{value}') + C.dim('/') + C.white('{total}') + C.dim(' │ ') +
+      C.gray(label),
     barCompleteChar:   '█',
     barIncompleteChar: '░',
     hideCursor:        true,
     clearOnComplete:   false,
     barsize:           30,
   }, cliProgress.Presets.shades_classic);
+
+  // tick(current, total) — convenience wrapper used throughout scraper.js
+  // Starts the bar on first call, then updates it.
+  bar.tick = function (current, total) {
+    if (!this.isActive) this.start(total || current, 0);
+    this.update(current);
+  };
+
+  return bar;
 }
 
 // ─── Status lines ─────────────────────────────────────────────────────────────
