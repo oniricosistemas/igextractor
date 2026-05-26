@@ -735,7 +735,49 @@ async function navigateAndCapture(username, options = {}) {
     }
   }
 
-  return result;
+  // If we have a user but counters are 0, try to read them from og:description meta tag
+  // e.g. "1.2M Followers, 300 Following, 4,500 Posts"
+  if (result.user) {
+    const hasCounters = (result.user.follower_count || result.user.following_count || result.user.media_count ||
+      (result.user.edge_followed_by && result.user.edge_followed_by.count) ||
+      (result.user.edge_follow && result.user.edge_follow.count) ||
+      (result.user.edge_owner_to_timeline_media && result.user.edge_owner_to_timeline_media.count));
+    if (!hasCounters) {
+      try {
+        const metaCounts = await page.evaluate(() => {
+          const og = document.querySelector('meta[property="og:description"]');
+          if (!og) return null;
+          const content = og.getAttribute('content') || '';
+          // "1.2M Followers, 456 Following, 789 Posts - ..."
+          const parseNum = s => {
+            if (!s) return 0;
+            s = s.replace(/,/g, '').trim();
+            const m = s.match(/^([\d.]+)([KMB]?)$/i);
+            if (!m) return 0;
+            const n = parseFloat(m[1]);
+            const mult = { k: 1e3, m: 1e6, b: 1e9 }[m[2].toLowerCase()] || 1;
+            return Math.round(n * mult);
+          };
+          const followers = content.match(/([\d.,]+[KMB]?)\s*Followers?/i);
+          const following = content.match(/([\d.,]+[KMB]?)\s*Following/i);
+          const posts     = content.match(/([\d.,]+[KMB]?)\s*Posts?/i);
+          return {
+            follower_count:  followers ? parseNum(followers[1]) : 0,
+            following_count: following ? parseNum(following[1]) : 0,
+            media_count:     posts     ? parseNum(posts[1])     : 0,
+          };
+        });
+        if (metaCounts && (metaCounts.follower_count || metaCounts.following_count || metaCounts.media_count)) {
+          dbg('[capture] og:description fallback counts:', metaCounts);
+          result.user.follower_count  = metaCounts.follower_count;
+          result.user.following_count = metaCounts.following_count;
+          result.user.media_count     = metaCounts.media_count;
+        }
+      } catch (e) {
+        dbg('[capture] og:description fallback failed:', e && e.message);
+      }
+    }
+  }
 }
 
 async function scrollForMorePosts(existingPosts, limit) {
@@ -1389,7 +1431,9 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
   for (let i = 0; i < postsToScan.length; i++) {
     const post    = postsToScan[i];
     const code    = getPostCode(post);
-    const mediaId = post.pk || post.id || post.media_id || null;
+    // Instagram IDs can be "mediaId_userId" — we only need the numeric part before "_"
+    const rawId   = post.pk || post.id || post.media_id || null;
+    const mediaId = rawId ? String(rawId).split('_')[0] : null;
     if (!mediaId) {
       dbg('[comments] no media id for post', code);
       if (bar && typeof bar.tick === 'function') bar.tick(i + 1, postsToScan.length);
@@ -1504,7 +1548,7 @@ async function runStoriesDownload(outputDir, profileData) {
   dbg('[stories] total story items to download:', storyItems.length);
 
   if (storyItems.length === 0) {
-    ui.warn('No stories found (profile may have no active stories)');
+    ui.warn('No stories found (profile may have no active stories, or stories require a different session)');
     return 0;
   }
 
