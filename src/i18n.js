@@ -3,6 +3,7 @@
 const STRINGS = {
   en: {
     checkingLicense:     'Checking license...',
+    wakingServer:        'Connecting to license server...',
     proVerified:         'Pro license verified.',
     offlineMode:         'Offline mode - using cached Pro status.',
     keyInvalid:          'API key found but invalid/revoked. Running on Free plan.',
@@ -192,6 +193,7 @@ const STRINGS = {
 
   es: {
     checkingLicense:     'Verificando licencia...',
+    wakingServer:        'Conectando con el servidor de licencias...',
     proVerified:         'Licencia Pro verificada.',
     offlineMode:         'Modo sin conexion - usando estado Pro en cache.',
     keyInvalid:          'Se encontro una API key pero no es valida o fue revocada. Ejecutando en plan Gratuito.',

@@ -124,6 +124,31 @@ async function run() {
     if (args.includes('--no-stories')) options.stories = false;
     if (args.includes('--captions')) options.captions = true;
     if (args.includes('--no-captions')) options.captions = false;
+    if (args.includes('--comments')) options.comments = true;
+    if (args.includes('--followers')) options.followers = true;
+    if (args.includes('--following')) options.following = true;
+
+    const commentLimitArg = args.find(a => a.startsWith('--comment-limit=') || a === '--comment-limit');
+    if (commentLimitArg) options.commentLimit = commentLimitArg.startsWith('--comment-limit=')
+      ? parseInt(commentLimitArg.split('=')[1], 10)
+      : parseInt(args[args.indexOf(commentLimitArg) + 1], 10);
+
+    // ── -apiKey inline: validate + save before extraction so isPro() is correct ──
+    const apiKeyArg = args.find(a => a === '-apiKey' || a === '--apiKey');
+    if (apiKeyArg) {
+      const key = args[args.indexOf(apiKeyArg) + 1];
+      if (key && /^IGX-/i.test(key)) {
+        const result = await license.validateKey(key);
+        if (result.valid || result.offline) {
+          license.saveApiKey(key);
+          license.setPlan('pro');
+          ui.ok(result.offline ? t('keySavedOffline') : t('proActivated').split('\n')[0]);
+        } else {
+          ui.err(t('keyInvalidCli', result.message));
+          process.exit(1);
+        }
+      }
+    }
 
     try {
       const { extractProfile } = require('./scraper');
@@ -152,10 +177,19 @@ async function run() {
   }
 
   // ── Ping backend to wake it up (Render free tier sleeps) ──────────────────
+  // Wait up to 12s for the server to wake before checking license.
+  // If it doesn't respond in time, checkLicense will fall back to cache.
   try {
     const axios = require('axios');
     const API_BASE = process.env.IGX_API_URL || 'https://igextractor-backend.onrender.com';
-    axios.get(API_BASE + '/health', { timeout: 5000 }).catch(() => {});
+    const ora = require('ora');
+    const spinner = ora({ text: t('wakingServer') || 'Connecting to license server...', spinner: 'dots' }).start();
+    try {
+      await axios.get(API_BASE + '/health', { timeout: 12000 });
+      spinner.stop();
+    } catch {
+      spinner.stop();
+    }
   } catch {}
 
   // ── License check (non-blocking) ─────────────────────────────────────────────

@@ -1417,22 +1417,9 @@ async function runStoriesDownload(outputDir, profileData) {
     if (storyItems.length > 0) break;
     try {
       dbg('[stories] trying API endpoint:', endpoint);
-      const resp = await axios.get(endpoint, {
-        headers: {
-          'Cookie': `sessionid=${_sessionId}`,
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Accept': '*/*',
-          'Accept-Language': 'es-AR,es;q=0.9,en;q=0.8',
-          'X-IG-App-ID': '936619743392459',
-          'X-Requested-With': 'XMLHttpRequest',
-          'Referer': `${IG_BASE}/stories/${profileData.username}/`,
-          'Origin': IG_BASE,
-        },
-        timeout: 15000,
-      });
-      const json = resp.data;
-      if (typeof json !== 'object' || json === null) {
-        dbg('[stories] API returned non-JSON (possible login redirect), skipping');
+      const json = await browserFetchJson(endpoint);
+      if (!json || json.__error) {
+        dbg('[stories] API error:', json && json.__error);
         continue;
       }
       dbg('[stories] API response top-level keys:', Object.keys(json).join(', '));
@@ -1456,7 +1443,7 @@ async function runStoriesDownload(outputDir, profileData) {
       }
       dbg('[stories] API endpoint yielded', storyItems.length, 'items');
     } catch (e) {
-      dbg('[stories] API endpoint failed:', endpoint, e.message);
+      dbg('[stories] endpoint failed:', endpoint, e.message);
     }
   }
 
