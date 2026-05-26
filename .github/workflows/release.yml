@@ -48,37 +48,15 @@ jobs:
         id: chromium
         shell: bash
         run: |
-          # Try common puppeteer cache locations
-          CHROME_DIR=""
-          for candidate in \
-            "node_modules/puppeteer/.local-chromium" \
-            "node_modules/puppeteer/.cache/puppeteer/chrome" \
-            "$HOME/.cache/puppeteer/chrome" \
-            "$LOCALAPPDATA/puppeteer/chrome" \
-            "$HOME/Library/Caches/puppeteer/chrome"; do
-            if [ -d "$candidate" ]; then
-              CHROME_DIR="$candidate"
-              break
-            fi
-          done
-          # Fallback: let node find it
-          if [ -z "$CHROME_DIR" ]; then
-            CHROME_DIR=$(node -e "
-              try {
-                const p = require('puppeteer');
-                const ep = p.executablePath();
-                // go up until we find the versioned folder
-                const path = require('path');
-                let d = path.dirname(ep);
-                while (d !== path.dirname(d)) {
-                  if (/chrome/i.test(path.basename(d))) { console.log(path.dirname(d)); break; }
-                  d = path.dirname(d);
-                }
-              } catch(e) { console.error(e.message); }
-            " 2>/dev/null || echo "")
-          fi
-          echo "dir=$CHROME_DIR" >> $GITHUB_OUTPUT
-          echo "Chromium dir: $CHROME_DIR"
+          # Use puppeteer to find the exact executable path
+          CHROME_EXE=$(node -e "
+            try {
+              const p = require('puppeteer');
+              console.log(p.executablePath());
+            } catch(e) { process.exit(1); }
+          " 2>/dev/null || echo "")
+          echo "exe=$CHROME_EXE" >> $GITHUB_OUTPUT
+          echo "Chromium exe: $CHROME_EXE"
 
       - name: Install pkg
         run: npm install -g @yao-pkg/pkg
@@ -97,26 +75,44 @@ jobs:
           cp dist/${{ matrix.binary }} "$STAGE/${{ matrix.binary }}"
           chmod +x "$STAGE/${{ matrix.binary }}"
 
-          # Copy Chromium
-          CHROME_DIR="${{ steps.chromium.outputs.dir }}"
-          if [ -n "$CHROME_DIR" ] && [ -d "$CHROME_DIR" ]; then
-            cp -r "$CHROME_DIR" "$STAGE/chromium"
-            echo "Chromium copied from $CHROME_DIR"
+          # Copy Chromium — place the executable at the exact path _findBundledChromium expects
+          CHROME_EXE="${{ steps.chromium.outputs.exe }}"
+          if [ -n "$CHROME_EXE" ] && [ -f "$CHROME_EXE" ]; then
+            if [[ "${{ matrix.platform }}" == "macos" ]]; then
+              # macOS: chromium/chrome-mac/Chromium.app/Contents/MacOS/Chromium
+              DEST_DIR="$STAGE/chromium/chrome-mac/Chromium.app/Contents/MacOS"
+              mkdir -p "$DEST_DIR"
+              cp "$CHROME_EXE" "$DEST_DIR/Chromium"
+              # Also copy the .app bundle structure if present
+              APP_DIR=$(dirname $(dirname $(dirname $(dirname "$CHROME_EXE"))))
+              if [ -d "$APP_DIR" ]; then
+                cp -r "$APP_DIR" "$STAGE/chromium/chrome-mac/" 2>/dev/null || true
+              fi
+            else
+              # Linux: chromium/chrome-linux/chrome
+              DEST_DIR="$STAGE/chromium/chrome-linux"
+              mkdir -p "$DEST_DIR"
+              cp "$CHROME_EXE" "$DEST_DIR/chrome"
+              chmod +x "$DEST_DIR/chrome"
+              # Copy sibling files (libs, etc) from same directory
+              cp -r "$(dirname $CHROME_EXE)/." "$DEST_DIR/" 2>/dev/null || true
+            fi
+            echo "Chromium staged at $DEST_DIR"
           else
-            echo "WARNING: Chromium not found, binary will download on first run"
+            echo "WARNING: Chromium exe not found at '$CHROME_EXE'"
           fi
 
           # README
           cat > "$STAGE/README.txt" << EOF
-          IGExtractor v${VERSION}
+IGExtractor v${VERSION}
 
-          Run: ./igextractor  (you may need: chmod +x igextractor)
+Run: ./igextractor  (you may need: chmod +x igextractor)
 
-          The chromium/ folder must stay next to the executable.
+The chromium/ folder must stay next to the executable.
 
-          Get Pro: https://cafecito.app/igextractor
-          GitHub:  https://github.com/${{ github.repository }}
-          EOF
+Get Pro: https://cafecito.app/igextractor
+GitHub:  https://github.com/${{ github.repository }}
+EOF
 
           # Zip
           cd dist
@@ -132,26 +128,30 @@ jobs:
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
           Copy-Item "dist\${{ matrix.binary }}" "$stage\${{ matrix.binary }}"
 
-          # Copy Chromium
-          $chromeDir = "${{ steps.chromium.outputs.dir }}"
-          if ($chromeDir -and (Test-Path $chromeDir)) {
-            Copy-Item -Recurse $chromeDir "$stage\chromium"
-            Write-Host "Chromium copied from $chromeDir"
+          # Copy Chromium — place at exact path _findBundledChromium expects
+          $chromeExe = "${{ steps.chromium.outputs.exe }}"
+          if ($chromeExe -and (Test-Path $chromeExe)) {
+            $destDir = "$stage\chromium\chrome-win"
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+            # Copy the entire chrome-win folder (sibling files needed by chrome.exe)
+            $chromeWinDir = Split-Path $chromeExe -Parent
+            Copy-Item -Recurse "$chromeWinDir\*" "$destDir\" -Force
+            Write-Host "Chromium staged at $destDir"
           } else {
-            Write-Warning "Chromium not found, binary will download on first run"
+            Write-Warning "Chromium exe not found at '$chromeExe'"
           }
 
           # README
           @"
-          IGExtractor v${version}
+IGExtractor v${version}
 
-          Run: igextractor.exe
+Run: igextractor.exe
 
-          The chromium\ folder must stay next to the executable.
+The chromium\ folder must stay next to the executable.
 
-          Get Pro: https://cafecito.app/igextractor
-          GitHub:  https://github.com/${{ github.repository }}
-          "@ | Set-Content "$stage\README.txt"
+Get Pro: https://cafecito.app/igextractor
+GitHub:  https://github.com/${{ github.repository }}
+"@ | Set-Content "$stage\README.txt"
 
           # Zip
           $zip = "dist\igextractor-${version}-win-x64.zip"

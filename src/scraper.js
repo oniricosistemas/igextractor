@@ -43,21 +43,23 @@ function _findBundledChromium() {
     for (const c of candidates) {
       if (fs.existsSync(c)) return c;
     }
-    // Fallback: walk up to 3 levels deep looking for chrome/chromium executable
-    return _walkForChrome(chromiumDir, 3);
+    // Fallback: walk up to 5 levels deep looking for chrome/chromium executable
+    return _walkForChrome(chromiumDir, 5);
   } catch { return undefined; }
 }
 
 function _walkForChrome(dir, depth) {
   if (depth < 0) return undefined;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isFile() && /^(chrome|chromium)(\.exe)?$/i.test(entry.name)) return full;
-    if (entry.isDirectory()) {
-      const found = _walkForChrome(full, depth - 1);
-      if (found) return found;
+  try {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isFile() && /^(chrome|chromium)(\.exe)?$/i.test(entry.name)) return full;
+      if (entry.isDirectory()) {
+        const found = _walkForChrome(full, depth - 1);
+        if (found) return found;
+      }
     }
-  }
+  } catch { /* ignore permission errors */ }
   return undefined;
 }
 
