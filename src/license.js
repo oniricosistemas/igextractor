@@ -76,10 +76,11 @@ async function checkLicense() {
   return { plan: _cachedPlan, valid: result.valid, key, ...result };
 }
 
-function isPro()  { return _cachedPlan === 'pro'; }
-function getPlan() { return _cachedPlan || 'free'; }
+function isPro()    { return _cachedPlan === 'pro'; }
+function getPlan()  { return _cachedPlan || 'free'; }
+function setPlan(p) { _cachedPlan = p; }
 
-module.exports = { readApiKey, saveApiKey, removeApiKey, validateKey, checkLicense, isPro, getPlan, ENV_FILE };
+module.exports = { readApiKey, saveApiKey, removeApiKey, validateKey, checkLicense, isPro, getPlan, setPlan, ENV_FILE };
 
 // ─── Session ID (saved for all plans) ────────────────────────────────────────
 function readSessionId() {
