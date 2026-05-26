@@ -7,7 +7,7 @@ const STRINGS = {
     offlineMode:         'Offline mode - using cached Pro status.',
     keyInvalid:          'API key found but invalid/revoked. Running on Free plan.',
 
-    planLineFree:        'Free plan active. 50 images max. No proxy, comments, followers or following.',
+    planLineFree:        'Free plan active. 10 images max. No proxy, comments, followers or following.',
     planLinePro:         'All features unlocked. Unlimited downloads.',
     offlineGrace:        'License server unreachable. Using cached Pro status (offline grace mode).',
     whatToDo:            'What would you like to do?',
@@ -36,7 +36,7 @@ const STRINGS = {
 
     askWhatDownload:     'What to download?',
     optImages:           'Images',
-    optImagesMax:        ' (max 50)',
+    optImagesMax:        ' (max 10)',
     optStories:          'Stories',
     optComments:         'Comments',
     optFollowers:        'Followers',
@@ -113,7 +113,7 @@ const STRINGS = {
     usageApiKey:         '  igextractor -apiKey <KEY>      - Save a Pro API key',
     usageEx1:            '  $ igextractor init',
     usageEx2:            '  $ igextractor -apiKey IGX-A1B2C3D4-E5F6A7B8-C9D0E1F2',
-    usageFreeLine:       'Free plan: 50 images, no proxy, no comments/followers/following.',
+    usageFreeLine:       'Free plan: 10 images, no proxy, no comments/followers/following.',
     usageProLine:        'Pro plan: Unlimited. All features. Proxy support.',
 
     noKeyProvided:       'Please provide an API key: igextractor -apiKey YOUR-KEY',
@@ -126,7 +126,7 @@ const STRINGS = {
     freeBadge:           ' FREE PLAN ',
 
     planPro:             'Pro (unlimited)',
-    planFree:            'Free (max 50 images)',
+    planFree:            'Free (max 10 images)',
     outputDir:           dir => `Output directory: ${dir}`,
     planLabel:           p => `Plan: ${p}`,
     imageLabel:          'image',
@@ -196,7 +196,7 @@ const STRINGS = {
     offlineMode:         'Modo sin conexion - usando estado Pro en cache.',
     keyInvalid:          'Se encontro una API key pero no es valida o fue revocada. Ejecutando en plan Gratuito.',
 
-    planLineFree:        'Plan Gratuito activo. Maximo 50 imagenes. Sin proxy, comentarios, seguidores ni seguidos.',
+    planLineFree:        'Plan Gratuito activo. Maximo 10 imagenes. Sin proxy, comentarios, seguidores ni seguidos.',
     planLinePro:         'Todas las funciones desbloqueadas. Descargas ilimitadas.',
     offlineGrace:        'Servidor de licencias inaccesible. Usando estado Pro en cache (modo sin conexion).',
     whatToDo:            'Que queres hacer?',
@@ -225,7 +225,7 @@ const STRINGS = {
 
     askWhatDownload:     'Que queres descargar?',
     optImages:           'Imagenes',
-    optImagesMax:        ' (max. 50)',
+    optImagesMax:        ' (max. 10)',
     optStories:          'Stories',
     optComments:         'Comentarios',
     optFollowers:        'Seguidores',
@@ -302,7 +302,7 @@ const STRINGS = {
     usageApiKey:         '  igextractor -apiKey <KEY>      - Guardar una API key Pro',
     usageEx1:            '  $ igextractor init',
     usageEx2:            '  $ igextractor -apiKey IGX-A1B2C3D4-E5F6A7B8-C9D0E1F2',
-    usageFreeLine:       'Plan Gratuito: 50 imagenes, sin proxy, sin comentarios/seguidores/seguidos.',
+    usageFreeLine:       'Plan Gratuito: 10 imagenes, sin proxy, sin comentarios/seguidores/seguidos.',
     usageProLine:        'Plan Pro: Ilimitado. Todas las funciones. Soporte de proxy.',
 
     noKeyProvided:       'Por favor proporciona una API key: igextractor -apiKey TU-KEY',
@@ -315,7 +315,7 @@ const STRINGS = {
     freeBadge:           ' PLAN GRATUITO ',
 
     planPro:             'Pro (ilimitado)',
-    planFree:            'Gratuito (max. 50 imagenes)',
+    planFree:            'Gratuito (max. 10 imagenes)',
     outputDir:           dir => `Directorio de salida: ${dir}`,
     planLabel:           p => `Plan: ${p}`,
     imageLabel:          'imagen',

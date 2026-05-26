@@ -10,7 +10,7 @@ const { dbg }        = require('./debug');
 
 let _debugBase = null;
 
-const FREE_LIMIT  = 50;
+const FREE_LIMIT  = 10;
 const IG_BASE     = 'https://www.instagram.com';
 const sleep       = ms => new Promise(r => setTimeout(r, ms));
 
@@ -1318,28 +1318,61 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
   const commentsMap = {};
   ui.sectionHeader(t('downloadingComments'));
   const bar = ui.createProgressBar(t('commentLabel'), 'brand');
-  const page = await getPage();
-  for (let i = 0; i < allPosts.length; i++) {
-    const post = allPosts[i];
-    const code = getPostCode(post);
-    const url = `${IG_BASE}/p/${code}/?comments`;
+
+  const igHeaders = {
+    'Cookie':           `sessionid=${_sessionId}`,
+    'User-Agent':       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept':           '*/*',
+    'Accept-Language':  'es-AR,es;q=0.9,en;q=0.8',
+    'X-IG-App-ID':      '936619743392459',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Referer':          IG_BASE + '/',
+    'Origin':           IG_BASE,
+  };
+
+  const postsToScan = allPosts.slice(0, limit);
+  for (let i = 0; i < postsToScan.length; i++) {
+    const post    = postsToScan[i];
+    const code    = getPostCode(post);
+    const mediaId = post.pk || post.id || post.media_id || null;
+    if (!mediaId) { dbg('[comments] no media id for post', code); bar.tick(i + 1, postsToScan.length); continue; }
+
+    const postComments = [];
+    let nextMinId = null;
+    let hasMore   = true;
+
     try {
-      await page.goto(url, { waitUntil: 'networkidle2', timeout: 20000 });
-      await sleep(2000);
-      const comments = await page.evaluate(() => {
-        const items = [];
-        const els = document.querySelectorAll('span._ap35c-dz3V-mS6S');
-        for (const el of els) {
-          items.push(el.innerText);
-          if (items.length >= 100) break;
+      while (hasMore && postComments.length < 500) {
+        const params = new URLSearchParams({ can_support_threading: 'true', permalink_enabled: 'false' });
+        if (nextMinId) params.set('min_id', nextMinId);
+        const endpoint = `${IG_BASE}/api/v1/media/${mediaId}/comments/?${params}`;
+        dbg('[comments] GET', endpoint);
+        const resp = await axios.get(endpoint, { headers: igHeaders, timeout: 15000 });
+        const json = resp.data;
+        if (!json || typeof json !== 'object') break;
+        const items = json.comments || [];
+        for (const c of items) {
+          postComments.push({
+            pk:        c.pk,
+            text:      c.text,
+            timestamp: c.created_at,
+            user:      c.user ? { pk: c.user.pk, username: c.user.username } : null,
+            likes:     c.comment_like_count || 0,
+          });
         }
-        return items;
-      });
-      commentsMap[code] = comments;
-    } catch {
-      dbg('Error fetching comments for', code);
+        hasMore   = json.has_more_comments || json.has_more_headload_comments || false;
+        nextMinId = json.next_min_id || null;
+        if (!nextMinId) hasMore = false;
+        if (hasMore) await sleep(800);
+      }
+      commentsMap[code] = postComments;
+      dbg('[comments] post', code, '->', postComments.length, 'comments');
+    } catch (e) {
+      dbg('[comments] error for', code, e.message);
+      commentsMap[code] = [];
     }
-    bar.tick(i + 1, allPosts.length);
+    bar.tick(i + 1, postsToScan.length);
+    if (i < postsToScan.length - 1) await sleep(1200);
   }
   bar.stop();
   fs.writeFileSync(path.join(outputDir, 'comments.json'), JSON.stringify(commentsMap, null, 2));
@@ -1445,48 +1478,100 @@ async function runStoriesDownload(outputDir, profileData) {
 }
 
 async function runFollowersDownload(outputDir, profileData) {
-  const results = [];
+  const userId = profileData.pk || profileData.id;
+  if (!userId) { ui.err(t('noUserId')); return 0; }
+
   ui.sectionHeader(t('downloadingFollowers'));
   const bar = ui.createProgressBar(t('followerLabel'), 'brand');
-  const page = await getPage();
-  await page.goto(`${IG_BASE}/${profileData.username}/followers/`, { waitUntil: 'networkidle2' });
-  await sleep(3000);
-  while (true) {
-    const data = await page.evaluate(() => {
-      const users = [];
-      document.querySelectorAll('span._ap35c-dz3V-mS6S').forEach(u => users.push(u.innerText));
-      return users;
-    });
-    if (!data || data.length === 0) break;
-    results.push(...data);
-    await page.evaluate(() => window.scrollBy(0, 1000));
-    await sleep(2000);
-    if (results.length >= 1000) break;
+
+  const igHeaders = {
+    'Cookie':           `sessionid=${_sessionId}`,
+    'User-Agent':       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept':           '*/*',
+    'Accept-Language':  'es-AR,es;q=0.9,en;q=0.8',
+    'X-IG-App-ID':      '936619743392459',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Referer':          `${IG_BASE}/${profileData.username}/followers/`,
+    'Origin':           IG_BASE,
+  };
+
+  const results = [];
+  let nextMaxId = null;
+  let hasMore   = true;
+
+  try {
+    while (hasMore && results.length < 5000) {
+      const params = new URLSearchParams({ count: '100', search_surface: 'follow_list_page' });
+      if (nextMaxId) params.set('max_id', nextMaxId);
+      const endpoint = `${IG_BASE}/api/v1/friendships/${userId}/followers/?${params}`;
+      dbg('[followers] GET', endpoint);
+      const resp = await axios.get(endpoint, { headers: igHeaders, timeout: 15000 });
+      const json = resp.data;
+      if (!json || typeof json !== 'object') break;
+      const users = json.users || [];
+      for (const u of users) {
+        results.push({ pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
+      }
+      hasMore   = json.big_list || (json.next_max_id != null);
+      nextMaxId = json.next_max_id || null;
+      if (!nextMaxId) hasMore = false;
+      bar.tick(results.length, results.length + (hasMore ? 1 : 0));
+      if (hasMore) await sleep(1500);
+    }
+  } catch (e) {
+    dbg('[followers] error:', e.message);
   }
+
   bar.stop();
   fs.writeFileSync(path.join(outputDir, 'followers.json'), JSON.stringify(results, null, 2));
   return results.length;
 }
 
 async function runFollowingDownload(outputDir, profileData) {
-  const results = [];
+  const userId = profileData.pk || profileData.id;
+  if (!userId) { ui.err(t('noUserId')); return 0; }
+
   ui.sectionHeader(t('downloadingFollowing'));
   const bar = ui.createProgressBar(t('followingLabel'), 'brand');
-  const page = await getPage();
-  await page.goto(`${IG_BASE}/${profileData.username}/following/`, { waitUntil: 'networkidle2' });
-  await sleep(3000);
-  while (true) {
-    const data = await page.evaluate(() => {
-      const users = [];
-      document.querySelectorAll('span._ap35c-dz3V-mS6S').forEach(u => users.push(u.innerText));
-      return users;
-    });
-    if (!data || data.length === 0) break;
-    results.push(...data);
-    await page.evaluate(() => window.scrollBy(0, 1000));
-    await sleep(2000);
-    if (results.length >= 1000) break;
+
+  const igHeaders = {
+    'Cookie':           `sessionid=${_sessionId}`,
+    'User-Agent':       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept':           '*/*',
+    'Accept-Language':  'es-AR,es;q=0.9,en;q=0.8',
+    'X-IG-App-ID':      '936619743392459',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Referer':          `${IG_BASE}/${profileData.username}/following/`,
+    'Origin':           IG_BASE,
+  };
+
+  const results = [];
+  let nextMaxId = null;
+  let hasMore   = true;
+
+  try {
+    while (hasMore && results.length < 5000) {
+      const params = new URLSearchParams({ count: '100' });
+      if (nextMaxId) params.set('max_id', nextMaxId);
+      const endpoint = `${IG_BASE}/api/v1/friendships/${userId}/following/?${params}`;
+      dbg('[following] GET', endpoint);
+      const resp = await axios.get(endpoint, { headers: igHeaders, timeout: 15000 });
+      const json = resp.data;
+      if (!json || typeof json !== 'object') break;
+      const users = json.users || [];
+      for (const u of users) {
+        results.push({ pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
+      }
+      hasMore   = json.big_list || (json.next_max_id != null);
+      nextMaxId = json.next_max_id || null;
+      if (!nextMaxId) hasMore = false;
+      bar.tick(results.length, results.length + (hasMore ? 1 : 0));
+      if (hasMore) await sleep(1500);
+    }
+  } catch (e) {
+    dbg('[following] error:', e.message);
   }
+
   bar.stop();
   fs.writeFileSync(path.join(outputDir, 'following.json'), JSON.stringify(results, null, 2));
   return results.length;

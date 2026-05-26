@@ -206,7 +206,7 @@ async function extractFlow(pro) {
   if (downloadLimit > 0) {
     ui.info(t('limitCustom', downloadLimit));
   } else if (!pro) {
-    ui.info(t('limitFree', 50));
+    ui.info(t('limitFree', 10));
   }
 
   // Ask comment limit separately (now tasks is defined)
