@@ -88,7 +88,12 @@ async function launchBrowser() {
     defaultViewport: { width: 1920, height: 1080 },
   };
   const bundled = _findBundledChromium();
-  if (bundled) launchOpts.executablePath = bundled;
+  if (bundled) {
+    launchOpts.executablePath = bundled;
+    console.error('[DEBUG] Using bundled Chromium:', bundled);
+  } else {
+    console.error('[DEBUG] No bundled Chromium found, using puppeteer default. process.pkg=', !!process.pkg, 'execPath=', process.execPath);
+  }
   _browser = await puppeteer.launch(launchOpts);
 }
 
@@ -898,8 +903,9 @@ async function fetchProfileOnly(username, options) {
     const { user } = await navigateAndCapture(username);
     spinner.stop(null);
     return user ? normalizeProfile(user) : null;
-  } catch {
+  } catch (e) {
     spinner.fail(null);
+    console.error('[ERROR] fetchProfileOnly failed:', e && e.message);
     return null;
   }
 }

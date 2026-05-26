@@ -99,7 +99,9 @@ async function extractFlow(pro) {
   let profileData = null;
   try {
     profileData = await fetchProfileOnly(username, { sessionId });
-  } catch {}
+  } catch (e) {
+    console.error('[ERROR] fetchProfileOnly threw:', e && e.message);
+  }
 
   if (!profileData) {
     spin.fail(t('profileNotFound', username));
