@@ -1,0 +1,204 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win
+            os: windows-latest
+            pkg_target: node18-win-x64
+            binary: igextractor.exe
+          - platform: macos
+            os: macos-latest
+            pkg_target: node18-macos-x64
+            binary: igextractor
+          - platform: linux
+            os: ubuntu-latest
+            pkg_target: node18-linux-x64
+            binary: igextractor
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Puppeteer downloads Chromium for the current OS during npm install.
+      # We locate it and copy it next to the binary later.
+      - name: Find Chromium path
+        id: chromium
+        shell: bash
+        run: |
+          # Try common puppeteer cache locations
+          CHROME_DIR=""
+          for candidate in \
+            "node_modules/puppeteer/.local-chromium" \
+            "node_modules/puppeteer/.cache/puppeteer/chrome" \
+            "$HOME/.cache/puppeteer/chrome" \
+            "$LOCALAPPDATA/puppeteer/chrome" \
+            "$HOME/Library/Caches/puppeteer/chrome"; do
+            if [ -d "$candidate" ]; then
+              CHROME_DIR="$candidate"
+              break
+            fi
+          done
+          # Fallback: let node find it
+          if [ -z "$CHROME_DIR" ]; then
+            CHROME_DIR=$(node -e "
+              try {
+                const p = require('puppeteer');
+                const ep = p.executablePath();
+                // go up until we find the versioned folder
+                const path = require('path');
+                let d = path.dirname(ep);
+                while (d !== path.dirname(d)) {
+                  if (/chrome/i.test(path.basename(d))) { console.log(path.dirname(d)); break; }
+                  d = path.dirname(d);
+                }
+              } catch(e) { console.error(e.message); }
+            " 2>/dev/null || echo "")
+          fi
+          echo "dir=$CHROME_DIR" >> $GITHUB_OUTPUT
+          echo "Chromium dir: $CHROME_DIR"
+
+      - name: Install pkg
+        run: npm install -g pkg
+
+      - name: Compile binary
+        run: pkg bin/igextractor.js --targets ${{ matrix.pkg_target }} --output dist/${{ matrix.binary }} --compress GZip
+        shell: bash
+
+      - name: Stage release folder (Unix)
+        if: matrix.platform != 'win'
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          STAGE="dist/igextractor-${VERSION}-${{ matrix.platform }}-x64"
+          mkdir -p "$STAGE"
+          cp dist/${{ matrix.binary }} "$STAGE/${{ matrix.binary }}"
+          chmod +x "$STAGE/${{ matrix.binary }}"
+
+          # Copy Chromium
+          CHROME_DIR="${{ steps.chromium.outputs.dir }}"
+          if [ -n "$CHROME_DIR" ] && [ -d "$CHROME_DIR" ]; then
+            cp -r "$CHROME_DIR" "$STAGE/chromium"
+            echo "Chromium copied from $CHROME_DIR"
+          else
+            echo "WARNING: Chromium not found, binary will download on first run"
+          fi
+
+          # README
+          cat > "$STAGE/README.txt" << EOF
+          IGExtractor v${VERSION}
+
+          Run: ./igextractor  (you may need: chmod +x igextractor)
+
+          The chromium/ folder must stay next to the executable.
+
+          Get Pro: https://cafecito.app/igextractor
+          GitHub:  https://github.com/${{ github.repository }}
+          EOF
+
+          # Zip
+          cd dist
+          zip -r "igextractor-${VERSION}-${{ matrix.platform }}-x64.zip" "igextractor-${VERSION}-${{ matrix.platform }}-x64/"
+          echo "ZIP_PATH=dist/igextractor-${VERSION}-${{ matrix.platform }}-x64.zip" >> $GITHUB_ENV
+
+      - name: Stage release folder (Windows)
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          $stage   = "dist\igextractor-${version}-win-x64"
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item "dist\${{ matrix.binary }}" "$stage\${{ matrix.binary }}"
+
+          # Copy Chromium
+          $chromeDir = "${{ steps.chromium.outputs.dir }}"
+          if ($chromeDir -and (Test-Path $chromeDir)) {
+            Copy-Item -Recurse $chromeDir "$stage\chromium"
+            Write-Host "Chromium copied from $chromeDir"
+          } else {
+            Write-Warning "Chromium not found, binary will download on first run"
+          }
+
+          # README
+          @"
+          IGExtractor v${version}
+
+          Run: igextractor.exe
+
+          The chromium\ folder must stay next to the executable.
+
+          Get Pro: https://cafecito.app/igextractor
+          GitHub:  https://github.com/${{ github.repository }}
+          "@ | Set-Content "$stage\README.txt"
+
+          # Zip
+          $zip = "dist\igextractor-${version}-win-x64.zip"
+          Compress-Archive -Path "$stage\*" -DestinationPath $zip -Force
+          echo "ZIP_PATH=$zip" >> $env:GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: igextractor-${{ matrix.platform }}
+          path: ${{ env.ZIP_PATH }}
+          retention-days: 1
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: IGExtractor ${{ github.ref_name }}
+          body: |
+            ## IGExtractor ${{ github.ref_name }}
+
+            ### Download
+
+            | Platform | File |
+            |----------|------|
+            | Windows x64 | `igextractor-*-win-x64.zip` |
+            | macOS x64   | `igextractor-*-macos-x64.zip` |
+            | Linux x64   | `igextractor-*-linux-x64.zip` |
+
+            ### Install
+
+            1. Download the ZIP for your platform
+            2. Extract it — keep the `chromium/` folder next to the executable
+            3. Run `igextractor` (or `igextractor.exe` on Windows)
+
+            ### Get Pro
+
+            ☕ [cafecito.app/igextractor](https://cafecito.app/igextractor) — one-time payment, lifetime access.
+          files: artifacts/**/*.zip
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
