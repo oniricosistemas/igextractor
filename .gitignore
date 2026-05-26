@@ -1,0 +1,7 @@
+node_modules/
+.env
+*.env
+*.log
+ig_*/
+.temp_env
+debug/
