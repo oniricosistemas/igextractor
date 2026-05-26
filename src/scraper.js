@@ -19,10 +19,52 @@ let _browser   = null;
 let _page      = null;
 let _sessionId = '';
 
+/**
+ * Locate Chromium when running as a pkg-compiled binary.
+ * The build script places chromium/ next to the executable.
+ * Returns executablePath string or undefined (puppeteer uses its own default).
+ */
+function _findBundledChromium() {
+  try {
+    // pkg sets process.pkg when running as compiled binary
+    if (!process.pkg) return undefined;
+    const exeDir = path.dirname(process.execPath);
+    const chromiumDir = path.join(exeDir, 'chromium');
+    if (!fs.existsSync(chromiumDir)) return undefined;
+    // Walk to find the actual browser binary
+    const candidates = [
+      // Windows
+      path.join(chromiumDir, 'chrome-win', 'chrome.exe'),
+      // macOS
+      path.join(chromiumDir, 'chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'),
+      // Linux
+      path.join(chromiumDir, 'chrome-linux', 'chrome'),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return c;
+    }
+    // Fallback: walk up to 3 levels deep looking for chrome/chromium executable
+    return _walkForChrome(chromiumDir, 3);
+  } catch { return undefined; }
+}
+
+function _walkForChrome(dir, depth) {
+  if (depth < 0) return undefined;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isFile() && /^(chrome|chromium)(\.exe)?$/i.test(entry.name)) return full;
+    if (entry.isDirectory()) {
+      const found = _walkForChrome(full, depth - 1);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
 async function launchBrowser() {
   if (_browser) return;
   const puppeteer = require('puppeteer');
-  _browser = await puppeteer.launch({
+  const launchOpts = {
     headless: 'new',
     args: [
       '--no-sandbox',
@@ -32,7 +74,10 @@ async function launchBrowser() {
       '--window-size=1920,1080',
     ],
     defaultViewport: { width: 1920, height: 1080 },
-  });
+  };
+  const bundled = _findBundledChromium();
+  if (bundled) launchOpts.executablePath = bundled;
+  _browser = await puppeteer.launch(launchOpts);
 }
 
 async function getPage() {

@@ -44,6 +44,7 @@
       <div class="hidden md:flex items-center gap-6">
         <a href="#features" class="font-body text-sm text-[#888] hover:text-[#f0f0f0] transition-colors" data-t="nav-features">Features</a>
         <a href="#pricing"  class="font-body text-sm text-[#888] hover:text-[#f0f0f0] transition-colors" data-t="nav-pricing">Pricing</a>
+        <a href="#ya-pague" class="font-body text-sm text-[#888] hover:text-[#f0f0f0] transition-colors" data-t="nav-paid">Already paid?</a>
         <a href="https://github.com/oniricosistemas/igextractor" target="_blank" class="font-body text-sm text-[#888] hover:text-[#f0f0f0] transition-colors">GitHub</a>
       </div>
     </div>
@@ -258,6 +259,33 @@
   </div>
 </section>
 
+<!-- ── Already paid form ── -->
+<section class="py-20 border-t border-[#2a2a2a]" id="ya-pague">
+  <div class="max-w-xl mx-auto px-6 text-center">
+    <p class="text-xs font-bold tracking-widest uppercase text-[#888] mb-3" data-t="form-label">Already paid?</p>
+    <h2 class="text-2xl md:text-3xl font-headline font-bold mb-2" data-t="form-title">Send me your email and I'll send your key</h2>
+    <p class="text-[#888] mb-8 text-sm" data-t="form-sub">Within 24 hours, you'll receive your Pro API key by email.</p>
+    <form id="pro-form" class="flex flex-col sm:flex-row gap-3 justify-center">
+      <input
+        id="pro-email"
+        type="email"
+        required
+        placeholder="your@email.com"
+        class="flex-1 bg-[#141414] border border-[#2a2a2a] rounded-lg px-4 py-3 text-sm text-[#f0f0f0] placeholder-[#555] focus:outline-none focus:border-[#DD2A7B] transition-colors"
+      />
+      <button
+        type="submit"
+        id="pro-submit"
+        class="px-6 py-3 gradient-bg text-white font-bold rounded-lg hover:opacity-90 transition-all active:scale-95 text-sm whitespace-nowrap"
+        data-t="form-btn"
+      >
+        Send my email
+      </button>
+    </form>
+    <p id="pro-form-msg" class="mt-4 text-sm hidden"></p>
+  </div>
+</section>
+
 <!-- ── Final CTA ── -->
 <section class="py-24 relative overflow-hidden text-center">
   <div class="absolute inset-0 bg-gradient-to-r from-[#F58529]/10 via-[#DD2A7B]/10 to-[#515BD4]/10 -z-10"></div>
@@ -299,7 +327,7 @@ const STRINGS = {
     'h1': 'Back up any Instagram profile in <span class="gradient-text">minutes</span>',
     'hero-sub': 'Photos, reels, stories, captions, comments and followers — all at once. No link-by-link nonsense.',
     'cta-free': '⬇ Download Free', 'cta-pro': '☕ Get Pro — buy me a coffee',
-    'nav-pro': '☕ Buy Pro', 'nav-features': 'Features', 'nav-pricing': 'Pricing',
+    'nav-pro': '☕ Buy Pro', 'nav-features': 'Features', 'nav-pricing': 'Pricing', 'nav-paid': 'Already paid?',
     'problem-strong': 'Every other downloader makes you paste links one by one.',
     'problem-rest': ' IGExtractor grabs the entire profile with a single command.',
     'features-label': 'Features', 'features-title-a': 'Power features for', 'features-title-b': 'power users',
@@ -318,14 +346,19 @@ const STRINGS = {
     'pro-f4':'Followers & following export','pro-f5':'Post captions',
     'pro-cta':'☕ Get Pro — buy me a coffee','pro-note':"After payment, you'll receive your API key by email.",
     'cta-title':'Ready to save everything?','cta-sub':'Download free and upgrade when you need the full power.',
-    'footer-disc':'Not affiliated with or endorsed by Instagram or Meta.','footer-pro':'Get Pro',
+    'form-label':'Already paid?','form-title':'Send me your email and I\'ll send your key',
+    'form-sub':'Within 24 hours, you\'ll receive your Pro API key by email.',
+    'form-btn':'Send my email',
+    'form-ok':'✓ Request received! Check your inbox in the next 24 hours.',
+    'form-dup':'Already registered. We\'ll contact you soon.',
+    'form-err':'Something went wrong. Try again or contact us on GitHub.',
   },
   es: {
     'badge': 'Herramienta CLI · Windows · macOS · Linux',
     'h1': 'Guardá cualquier perfil de Instagram en <span class="gradient-text">minutos</span>',
     'hero-sub': 'Fotos, reels, stories, textos, comentarios y seguidores — todo de una sola vez. Sin pegar links uno por uno.',
     'cta-free': '⬇ Descargar gratis', 'cta-pro': '☕ Obtener Pro — invitame un café',
-    'nav-pro': '☕ Comprar Pro', 'nav-features': 'Funciones', 'nav-pricing': 'Precios',
+    'nav-pro': '☕ Comprar Pro', 'nav-features': 'Funciones', 'nav-pricing': 'Precios', 'nav-paid': '¿Ya pagaste?',
     'problem-strong': 'Todas las otras herramientas te hacen pegar los links uno por uno.',
     'problem-rest': ' IGExtractor descarga el perfil completo con un solo comando.',
     'features-label': 'Funciones', 'features-title-a': 'Funciones pensadas para', 'features-title-b': 'usuarios exigentes',
@@ -345,6 +378,12 @@ const STRINGS = {
     'pro-cta':'☕ Obtener Pro — invitame un café','pro-note':'Después del pago recibís tu API key por email.',
     'cta-title':'¿Listo para guardar todo?','cta-sub':'Descargá gratis y actualizá cuando necesites el poder completo.',
     'footer-disc':'No afiliado ni avalado por Instagram o Meta.','footer-pro':'Obtener Pro',
+    'form-label':'¿Ya pagaste?','form-title':'Mandame tu email y te envío la key',
+    'form-sub':'En menos de 24 horas recibís tu API key Pro por email.',
+    'form-btn':'Enviar mi email',
+    'form-ok':'✓ ¡Solicitud recibida! Revisá tu bandeja en las próximas 24 horas.',
+    'form-dup':'Ya registramos tu email. Te contactamos pronto.',
+    'form-err':'Algo falló. Intentá de nuevo o contactanos en GitHub.',
   }
 };
 
@@ -371,6 +410,46 @@ document.querySelectorAll('a[href^="#"]').forEach(a => {
     e.preventDefault();
     document.querySelector(a.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth' });
   });
+});
+
+// ── Pro request form ──────────────────────────────────────────────────────────
+const BACKEND = 'https://igextractor-backend.onrender.com';
+
+document.getElementById('pro-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email  = document.getElementById('pro-email').value.trim();
+  const btn    = document.getElementById('pro-submit');
+  const msg    = document.getElementById('pro-form-msg');
+  const s      = STRINGS[lang];
+
+  btn.disabled = true;
+  btn.textContent = '…';
+  msg.className = 'mt-4 text-sm hidden';
+
+  try {
+    const res  = await fetch(`${BACKEND}/pro-request`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ email }),
+    });
+    const data = await res.json();
+
+    if (res.ok && data.success) {
+      const isDup = data.message && data.message.toLowerCase().includes('already');
+      msg.textContent = isDup ? s['form-dup'] : s['form-ok'];
+      msg.className = `mt-4 text-sm ${isDup ? 'text-[#888]' : 'text-[#3ecf8e]'}`;
+      document.getElementById('pro-email').value = '';
+    } else {
+      msg.textContent = s['form-err'];
+      msg.className = 'mt-4 text-sm text-[#DD2A7B]';
+    }
+  } catch {
+    msg.textContent = s['form-err'];
+    msg.className = 'mt-4 text-sm text-[#DD2A7B]';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = s['form-btn'];
+  }
 });
 </script>
 </body>
