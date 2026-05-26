@@ -99,16 +99,8 @@ jobs:
             echo "WARNING: Chromium exe not found at '$CHROME_EXE'"
           fi
 
-          cat > "$STAGE/README.txt" << EOF
-IGExtractor v${VERSION}
-
-Run: ./${BINARY}  (you may need: chmod +x ${BINARY})
-
-The chromium/ folder must stay next to the executable.
-
-Get Pro: https://cafecito.app/igextractor
-GitHub:  https://github.com/${REPO}
-EOF
+          printf 'IGExtractor v%s\n\nRun: ./%s  (you may need: chmod +x %s)\n\nThe chromium/ folder must stay next to the executable.\n\nGet Pro: https://cafecito.app/igextractor\nGitHub:  https://github.com/%s\n' \
+            "$VERSION" "$BINARY" "$BINARY" "$REPO" > "$STAGE/README.txt"
 
           cd dist
           zip -r "igextractor-${VERSION}-${PLATFORM}-x64.zip" "igextractor-${VERSION}-${PLATFORM}-x64/"
@@ -138,16 +130,7 @@ EOF
             Write-Warning "Chromium exe not found at '$chromeExe'"
           }
 
-          @"
-IGExtractor v${version}
-
-Run: igextractor.exe
-
-The chromium\ folder must stay next to the executable.
-
-Get Pro: https://cafecito.app/igextractor
-GitHub:  https://github.com/$($env:REPO)
-"@ | Set-Content "$stage\README.txt"
+          "IGExtractor v${version}`n`nRun: igextractor.exe`n`nThe chromium\ folder must stay next to the executable.`n`nGet Pro: https://cafecito.app/igextractor`nGitHub:  https://github.com/$($env:REPO)" | Set-Content "$stage\README.txt"
 
           $zip = "dist\igextractor-${version}-win-x64.zip"
           Compress-Archive -Path "$stage\*" -DestinationPath $zip -Force
