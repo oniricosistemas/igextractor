@@ -792,7 +792,6 @@ async function navigateAndCapture(username, options = {}) {
         }
       } catch (e) {
         dbg('[capture] og:description fallback failed:', e && e.message);
-        }
       }
     }
   }
