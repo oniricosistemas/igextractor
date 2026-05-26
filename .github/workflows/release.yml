@@ -68,72 +68,69 @@ jobs:
       - name: Stage release folder (Unix)
         if: matrix.platform != 'win'
         shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          BINARY: ${{ matrix.binary }}
+          CHROME_EXE: ${{ steps.chromium.outputs.exe }}
+          REPO: ${{ github.repository }}
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          STAGE="dist/igextractor-${VERSION}-${{ matrix.platform }}-x64"
+          STAGE="dist/igextractor-${VERSION}-${PLATFORM}-x64"
           mkdir -p "$STAGE"
-          cp dist/${{ matrix.binary }} "$STAGE/${{ matrix.binary }}"
-          chmod +x "$STAGE/${{ matrix.binary }}"
+          cp "dist/${BINARY}" "$STAGE/${BINARY}"
+          chmod +x "$STAGE/${BINARY}"
 
-          # Copy Chromium — place the executable at the exact path _findBundledChromium expects
-          CHROME_EXE="${{ steps.chromium.outputs.exe }}"
+          # Copy Chromium to exact path _findBundledChromium expects
           if [ -n "$CHROME_EXE" ] && [ -f "$CHROME_EXE" ]; then
-            if [[ "${{ matrix.platform }}" == "macos" ]]; then
-              # macOS: chromium/chrome-mac/Chromium.app/Contents/MacOS/Chromium
+            if [ "$PLATFORM" = "macos" ]; then
               DEST_DIR="$STAGE/chromium/chrome-mac/Chromium.app/Contents/MacOS"
               mkdir -p "$DEST_DIR"
               cp "$CHROME_EXE" "$DEST_DIR/Chromium"
-              # Also copy the .app bundle structure if present
-              APP_DIR=$(dirname $(dirname $(dirname $(dirname "$CHROME_EXE"))))
-              if [ -d "$APP_DIR" ]; then
-                cp -r "$APP_DIR" "$STAGE/chromium/chrome-mac/" 2>/dev/null || true
-              fi
+              APP_DIR=$(dirname "$(dirname "$(dirname "$(dirname "$CHROME_EXE")")")")
+              [ -d "$APP_DIR" ] && cp -r "$APP_DIR" "$STAGE/chromium/chrome-mac/" 2>/dev/null || true
             else
-              # Linux: chromium/chrome-linux/chrome
               DEST_DIR="$STAGE/chromium/chrome-linux"
               mkdir -p "$DEST_DIR"
-              cp "$CHROME_EXE" "$DEST_DIR/chrome"
-              chmod +x "$DEST_DIR/chrome"
-              # Copy sibling files (libs, etc) from same directory
-              cp -r "$(dirname $CHROME_EXE)/." "$DEST_DIR/" 2>/dev/null || true
+              cp -r "$(dirname "$CHROME_EXE")/." "$DEST_DIR/"
+              chmod +x "$DEST_DIR/chrome" 2>/dev/null || true
             fi
             echo "Chromium staged at $DEST_DIR"
           else
             echo "WARNING: Chromium exe not found at '$CHROME_EXE'"
           fi
 
-          # README
           cat > "$STAGE/README.txt" << EOF
 IGExtractor v${VERSION}
 
-Run: ./igextractor  (you may need: chmod +x igextractor)
+Run: ./${BINARY}  (you may need: chmod +x ${BINARY})
 
 The chromium/ folder must stay next to the executable.
 
 Get Pro: https://cafecito.app/igextractor
-GitHub:  https://github.com/${{ github.repository }}
+GitHub:  https://github.com/${REPO}
 EOF
 
-          # Zip
           cd dist
-          zip -r "igextractor-${VERSION}-${{ matrix.platform }}-x64.zip" "igextractor-${VERSION}-${{ matrix.platform }}-x64/"
-          echo "ZIP_PATH=dist/igextractor-${VERSION}-${{ matrix.platform }}-x64.zip" >> $GITHUB_ENV
+          zip -r "igextractor-${VERSION}-${PLATFORM}-x64.zip" "igextractor-${VERSION}-${PLATFORM}-x64/"
+          echo "ZIP_PATH=dist/igextractor-${VERSION}-${PLATFORM}-x64.zip" >> $GITHUB_ENV
 
       - name: Stage release folder (Windows)
         if: matrix.platform == 'win'
         shell: pwsh
+        env:
+          CHROME_EXE: ${{ steps.chromium.outputs.exe }}
+          REPO: ${{ github.repository }}
         run: |
-          $version = $env:GITHUB_REF_NAME -replace '^v', ''
-          $stage   = "dist\igextractor-${version}-win-x64"
+          $version    = $env:GITHUB_REF_NAME -replace '^v', ''
+          $chromeExe  = $env:CHROME_EXE
+          $stage      = "dist\igextractor-${version}-win-x64"
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Copy-Item "dist\${{ matrix.binary }}" "$stage\${{ matrix.binary }}"
+          Copy-Item "dist\igextractor.exe" "$stage\igextractor.exe"
 
-          # Copy Chromium — place at exact path _findBundledChromium expects
-          $chromeExe = "${{ steps.chromium.outputs.exe }}"
+          # Copy Chromium to exact path _findBundledChromium expects
           if ($chromeExe -and (Test-Path $chromeExe)) {
             $destDir = "$stage\chromium\chrome-win"
             New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-            # Copy the entire chrome-win folder (sibling files needed by chrome.exe)
             $chromeWinDir = Split-Path $chromeExe -Parent
             Copy-Item -Recurse "$chromeWinDir\*" "$destDir\" -Force
             Write-Host "Chromium staged at $destDir"
@@ -141,7 +138,6 @@ EOF
             Write-Warning "Chromium exe not found at '$chromeExe'"
           }
 
-          # README
           @"
 IGExtractor v${version}
 
@@ -150,10 +146,9 @@ Run: igextractor.exe
 The chromium\ folder must stay next to the executable.
 
 Get Pro: https://cafecito.app/igextractor
-GitHub:  https://github.com/${{ github.repository }}
+GitHub:  https://github.com/$($env:REPO)
 "@ | Set-Content "$stage\README.txt"
 
-          # Zip
           $zip = "dist\igextractor-${version}-win-x64.zip"
           Compress-Archive -Path "$stage\*" -DestinationPath $zip -Force
           echo "ZIP_PATH=$zip" >> $env:GITHUB_ENV
