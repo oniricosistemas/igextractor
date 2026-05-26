@@ -1314,28 +1314,42 @@ async function runCaptionDownload(outputDir, allPosts, imageMap) {
   return results.length;
 }
 
+async function browserFetchJson(url) {
+  const page = await getPage();
+  const json = await page.evaluate(async (fetchUrl) => {
+    try {
+      const resp = await fetch(fetchUrl, {
+        headers: {
+          'Accept':           'application/json, text/plain, */*',
+          'X-IG-App-ID':      '936619743392459',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        credentials: 'include',
+      });
+      if (!resp.ok) return { __error: resp.status };
+      return await resp.json();
+    } catch (e) {
+      return { __error: e.message };
+    }
+  }, url);
+  return json;
+}
+
 async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) {
   const commentsMap = {};
   ui.sectionHeader(t('downloadingComments'));
   const bar = ui.createProgressBar(t('commentLabel'), 'brand');
-
-  const igHeaders = {
-    'Cookie':           `sessionid=${_sessionId}`,
-    'User-Agent':       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    'Accept':           '*/*',
-    'Accept-Language':  'es-AR,es;q=0.9,en;q=0.8',
-    'X-IG-App-ID':      '936619743392459',
-    'X-Requested-With': 'XMLHttpRequest',
-    'Referer':          IG_BASE + '/',
-    'Origin':           IG_BASE,
-  };
 
   const postsToScan = allPosts.slice(0, limit);
   for (let i = 0; i < postsToScan.length; i++) {
     const post    = postsToScan[i];
     const code    = getPostCode(post);
     const mediaId = post.pk || post.id || post.media_id || null;
-    if (!mediaId) { dbg('[comments] no media id for post', code); bar.tick(i + 1, postsToScan.length); continue; }
+    if (!mediaId) {
+      dbg('[comments] no media id for post', code);
+      if (bar && typeof bar.tick === 'function') bar.tick(i + 1, postsToScan.length);
+      continue;
+    }
 
     const postComments = [];
     let nextMinId = null;
@@ -1346,10 +1360,9 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
         const params = new URLSearchParams({ can_support_threading: 'true', permalink_enabled: 'false' });
         if (nextMinId) params.set('min_id', nextMinId);
         const endpoint = `${IG_BASE}/api/v1/media/${mediaId}/comments/?${params}`;
-        dbg('[comments] GET', endpoint);
-        const resp = await axios.get(endpoint, { headers: igHeaders, timeout: 15000 });
-        const json = resp.data;
-        if (!json || typeof json !== 'object') break;
+        dbg('[comments] browser fetch', endpoint);
+        const json = await browserFetchJson(endpoint);
+        if (!json || json.__error) { dbg('[comments] API error:', json && json.__error); break; }
         const items = json.comments || [];
         for (const c of items) {
           postComments.push({
@@ -1371,7 +1384,7 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
       dbg('[comments] error for', code, e.message);
       commentsMap[code] = [];
     }
-    bar.tick(i + 1, postsToScan.length);
+    if (bar && typeof bar.tick === 'function') bar.tick(i + 1, postsToScan.length);
     if (i < postsToScan.length - 1) await sleep(1200);
   }
   bar.stop();
@@ -1484,17 +1497,6 @@ async function runFollowersDownload(outputDir, profileData) {
   ui.sectionHeader(t('downloadingFollowers'));
   const bar = ui.createProgressBar(t('followerLabel'), 'brand');
 
-  const igHeaders = {
-    'Cookie':           `sessionid=${_sessionId}`,
-    'User-Agent':       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    'Accept':           '*/*',
-    'Accept-Language':  'es-AR,es;q=0.9,en;q=0.8',
-    'X-IG-App-ID':      '936619743392459',
-    'X-Requested-With': 'XMLHttpRequest',
-    'Referer':          `${IG_BASE}/${profileData.username}/followers/`,
-    'Origin':           IG_BASE,
-  };
-
   const results = [];
   let nextMaxId = null;
   let hasMore   = true;
@@ -1504,10 +1506,9 @@ async function runFollowersDownload(outputDir, profileData) {
       const params = new URLSearchParams({ count: '100', search_surface: 'follow_list_page' });
       if (nextMaxId) params.set('max_id', nextMaxId);
       const endpoint = `${IG_BASE}/api/v1/friendships/${userId}/followers/?${params}`;
-      dbg('[followers] GET', endpoint);
-      const resp = await axios.get(endpoint, { headers: igHeaders, timeout: 15000 });
-      const json = resp.data;
-      if (!json || typeof json !== 'object') break;
+      dbg('[followers] browser fetch', endpoint);
+      const json = await browserFetchJson(endpoint);
+      if (!json || json.__error) { dbg('[followers] API error:', json && json.__error); break; }
       const users = json.users || [];
       for (const u of users) {
         results.push({ pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
@@ -1515,7 +1516,7 @@ async function runFollowersDownload(outputDir, profileData) {
       hasMore   = json.big_list || (json.next_max_id != null);
       nextMaxId = json.next_max_id || null;
       if (!nextMaxId) hasMore = false;
-      bar.tick(results.length, results.length + (hasMore ? 1 : 0));
+      if (bar && typeof bar.tick === 'function') bar.tick(results.length, results.length + (hasMore ? 1 : 0));
       if (hasMore) await sleep(1500);
     }
   } catch (e) {
@@ -1534,17 +1535,6 @@ async function runFollowingDownload(outputDir, profileData) {
   ui.sectionHeader(t('downloadingFollowing'));
   const bar = ui.createProgressBar(t('followingLabel'), 'brand');
 
-  const igHeaders = {
-    'Cookie':           `sessionid=${_sessionId}`,
-    'User-Agent':       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    'Accept':           '*/*',
-    'Accept-Language':  'es-AR,es;q=0.9,en;q=0.8',
-    'X-IG-App-ID':      '936619743392459',
-    'X-Requested-With': 'XMLHttpRequest',
-    'Referer':          `${IG_BASE}/${profileData.username}/following/`,
-    'Origin':           IG_BASE,
-  };
-
   const results = [];
   let nextMaxId = null;
   let hasMore   = true;
@@ -1554,10 +1544,9 @@ async function runFollowingDownload(outputDir, profileData) {
       const params = new URLSearchParams({ count: '100' });
       if (nextMaxId) params.set('max_id', nextMaxId);
       const endpoint = `${IG_BASE}/api/v1/friendships/${userId}/following/?${params}`;
-      dbg('[following] GET', endpoint);
-      const resp = await axios.get(endpoint, { headers: igHeaders, timeout: 15000 });
-      const json = resp.data;
-      if (!json || typeof json !== 'object') break;
+      dbg('[following] browser fetch', endpoint);
+      const json = await browserFetchJson(endpoint);
+      if (!json || json.__error) { dbg('[following] API error:', json && json.__error); break; }
       const users = json.users || [];
       for (const u of users) {
         results.push({ pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
@@ -1565,7 +1554,7 @@ async function runFollowingDownload(outputDir, profileData) {
       hasMore   = json.big_list || (json.next_max_id != null);
       nextMaxId = json.next_max_id || null;
       if (!nextMaxId) hasMore = false;
-      bar.tick(results.length, results.length + (hasMore ? 1 : 0));
+      if (bar && typeof bar.tick === 'function') bar.tick(results.length, results.length + (hasMore ? 1 : 0));
       if (hasMore) await sleep(1500);
     }
   } catch (e) {
