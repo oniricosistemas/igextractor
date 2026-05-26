@@ -490,7 +490,7 @@ async function navigateAndCapture(username, options = {}) {
 
       function extractMedia(obj) {
         if (!obj || typeof obj !== 'object') return;
-        if (obj.shortcode || obj.code || (obj.pk && obj.edge_media_to_caption) || (obj.pk && obj.media_type && obj.taken_at)) {
+        if (!obj.carousel_parent_id && (obj.shortcode || obj.code || (obj.pk && obj.edge_media_to_caption) || (obj.pk && obj.media_type && obj.taken_at))) {
           const code = getPostCode(obj);
           if (code) {
             if (!result.posts.some(p => getPostCode(p) === code)) {
