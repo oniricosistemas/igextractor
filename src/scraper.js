@@ -26,24 +26,34 @@ let _sessionId = '';
  */
 function _findBundledChromium() {
   try {
-    // pkg sets process.pkg when running as compiled binary
     if (!process.pkg) return undefined;
     const exeDir = path.dirname(process.execPath);
     const chromiumDir = path.join(exeDir, 'chromium');
     if (!fs.existsSync(chromiumDir)) return undefined;
-    // Walk to find the actual browser binary
-    const candidates = [
-      // Windows
-      path.join(chromiumDir, 'chrome-win', 'chrome.exe'),
-      // macOS
-      path.join(chromiumDir, 'chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'),
-      // Linux
-      path.join(chromiumDir, 'chrome-linux', 'chrome'),
+
+    // Check if the binary is directly in chromium/ (flat layout from CI)
+    const directCandidates = [
+      path.join(chromiumDir, 'chrome.exe'),
+      path.join(chromiumDir, 'chrome'),
+      path.join(chromiumDir, 'Chromium'),
     ];
-    for (const c of candidates) {
+    for (const c of directCandidates) {
       if (fs.existsSync(c)) return c;
     }
-    // Fallback: walk up to 5 levels deep looking for chrome/chromium executable
+
+    // Legacy nested layout candidates
+    const nestedCandidates = [
+      path.join(chromiumDir, 'chrome-win', 'chrome.exe'),
+      path.join(chromiumDir, 'chrome-win64', 'chrome.exe'),
+      path.join(chromiumDir, 'chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'),
+      path.join(chromiumDir, 'chrome-linux', 'chrome'),
+      path.join(chromiumDir, 'chrome-linux64', 'chrome'),
+    ];
+    for (const c of nestedCandidates) {
+      if (fs.existsSync(c)) return c;
+    }
+
+    // Deep walk fallback
     return _walkForChrome(chromiumDir, 5);
   } catch { return undefined; }
 }

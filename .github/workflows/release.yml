@@ -82,19 +82,13 @@ jobs:
 
           # Copy Chromium to exact path _findBundledChromium expects
           if [ -n "$CHROME_EXE" ] && [ -f "$CHROME_EXE" ]; then
-            if [ "$PLATFORM" = "macos" ]; then
-              DEST_DIR="$STAGE/chromium/chrome-mac/Chromium.app/Contents/MacOS"
-              mkdir -p "$DEST_DIR"
-              cp "$CHROME_EXE" "$DEST_DIR/Chromium"
-              APP_DIR=$(dirname "$(dirname "$(dirname "$(dirname "$CHROME_EXE")")")")
-              [ -d "$APP_DIR" ] && cp -r "$APP_DIR" "$STAGE/chromium/chrome-mac/" 2>/dev/null || true
-            else
-              DEST_DIR="$STAGE/chromium/chrome-linux"
-              mkdir -p "$DEST_DIR"
-              cp -r "$(dirname "$CHROME_EXE")/." "$DEST_DIR/"
-              chmod +x "$DEST_DIR/chrome" 2>/dev/null || true
-            fi
-            echo "Chromium staged at $DEST_DIR"
+            # Copy the entire parent folder — _findBundledChromium walks depth=5 to find the binary
+            CHROME_PARENT="$(dirname "$CHROME_EXE")"
+            mkdir -p "$STAGE/chromium"
+            cp -r "$CHROME_PARENT/." "$STAGE/chromium/"
+            chmod +x "$STAGE/chromium/chrome" 2>/dev/null || true
+            chmod +x "$STAGE/chromium/Chromium" 2>/dev/null || true
+            echo "Chromium staged from $CHROME_PARENT"
           else
             echo "WARNING: Chromium exe not found at '$CHROME_EXE'"
           fi
@@ -119,13 +113,13 @@ jobs:
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
           Copy-Item "dist\igextractor.exe" "$stage\igextractor.exe"
 
-          # Copy Chromium to exact path _findBundledChromium expects
+          # Copy Chromium — _findBundledChromium walks depth=5 to find chrome.exe
           if ($chromeExe -and (Test-Path $chromeExe)) {
-            $destDir = "$stage\chromium\chrome-win"
+            $chromeParent = Split-Path $chromeExe -Parent
+            $destDir = "$stage\chromium"
             New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-            $chromeWinDir = Split-Path $chromeExe -Parent
-            Copy-Item -Recurse "$chromeWinDir\*" "$destDir\" -Force
-            Write-Host "Chromium staged at $destDir"
+            Copy-Item -Recurse "$chromeParent\*" "$destDir\" -Force
+            Write-Host "Chromium staged from $chromeParent"
           } else {
             Write-Warning "Chromium exe not found at '$chromeExe'"
           }
