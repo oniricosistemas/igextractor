@@ -180,7 +180,9 @@ function createProgressBar(label, colorKey = 'cyan') {
   // tick(current, total) — convenience wrapper used throughout scraper.js
   // Starts the bar on first call, then updates it.
   bar.tick = function (current, total) {
-    if (!this.isActive) this.start(total || current, 0);
+    const safeTotal = Math.max(total || current, current);
+    if (!this.isActive) this.start(safeTotal, 0);
+    else if (safeTotal > this.total) this.setTotal(safeTotal);
     this.update(current);
   };
 

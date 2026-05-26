@@ -1354,6 +1354,9 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
     const postComments = [];
     let nextMinId = null;
     let hasMore   = true;
+    if (bar.isActive) bar.stop();
+    const spinner = ui.createSpinner(`Post ${i + 1}/${postsToScan.length} (${code}): obteniendo comentarios`);
+    spinner.start();
 
     try {
       while (hasMore && postComments.length < 500) {
@@ -1373,21 +1376,24 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
             likes:     c.comment_like_count || 0,
           });
         }
+        spinner.update(`Post ${i + 1}/${postsToScan.length} (${code}): ${postComments.length} comentarios...`);
         hasMore   = json.has_more_comments || json.has_more_headload_comments || false;
         nextMinId = json.next_min_id || null;
         if (!nextMinId) hasMore = false;
         if (hasMore) await sleep(800);
       }
+      spinner.stop(`Post ${code}: ${postComments.length} comentarios`);
       commentsMap[code] = postComments;
       dbg('[comments] post', code, '->', postComments.length, 'comments');
     } catch (e) {
+      spinner.fail(`Post ${code}: error`);
       dbg('[comments] error for', code, e.message);
       commentsMap[code] = [];
     }
-    if (bar && typeof bar.tick === 'function') bar.tick(i + 1, postsToScan.length);
+    bar.tick(i + 1, postsToScan.length);
     if (i < postsToScan.length - 1) await sleep(1200);
   }
-  bar.stop();
+  if (bar.isActive) bar.stop();
   fs.writeFileSync(path.join(outputDir, 'comments.json'), JSON.stringify(commentsMap, null, 2));
   return Object.values(commentsMap).reduce((acc, curr) => acc + curr.length, 0);
 }
