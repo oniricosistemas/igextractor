@@ -58,6 +58,9 @@ jobs:
           echo "exe=$CHROME_EXE" >> $GITHUB_OUTPUT
           echo "Chromium exe: $CHROME_EXE"
 
+      - name: Syntax check
+        run: node -e "require('fs').readdirSync('src').filter(f=>f.endsWith('.js')).forEach(f=>{require('child_process').execSync('node --check src/'+f,{stdio:'inherit'})})"
+
       - name: Install pkg
         run: npm install -g @yao-pkg/pkg
 
