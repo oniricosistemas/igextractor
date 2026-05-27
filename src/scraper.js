@@ -765,19 +765,32 @@ async function navigateAndCapture(username, options = {}) {
           const og = document.querySelector('meta[property="og:description"]');
           if (!og) return null;
           const content = og.getAttribute('content') || '';
-          // "1.2M Followers, 456 Following, 789 Posts - ..."
+          // "1.2M Followers, 456 Following, 789 Posts - ..." (EN or ES)
           const parseNum = s => {
             if (!s) return 0;
-            s = s.replace(/,/g, '').trim();
-            const m = s.match(/^([\d.]+)([KMB]?)$/i);
+            s = s.trim();
+            const m = s.match(/^([\d.,]+)\s*([KMBkmb]?)$/);
             if (!m) return 0;
-            const n = parseFloat(m[1]);
-            const mult = { k: 1e3, m: 1e6, b: 1e9 }[m[2].toLowerCase()] || 1;
+            // Remove thousand separators: if suffix present, strip all dots/commas except decimal
+            // Strategy: if there's a suffix, just strip all non-digit except last dot/comma before digits
+            let numStr = m[1];
+            const suffix = m[2].toLowerCase();
+            if (suffix) {
+              // e.g. "8", "1.2", "47" — strip thousand seps
+              numStr = numStr.replace(/[.,](?=\d{3}$)/, ''); // "1.234" -> "1234" only if exactly 3 trailing digits
+              numStr = numStr.replace(/,/g, '');
+            } else {
+              // plain number like "47.000" or "1,234,567"
+              numStr = numStr.replace(/[.,](?=\d{3})/g, '');
+              numStr = numStr.replace(/,/g, '.');
+            }
+            const n = parseFloat(numStr) || 0;
+            const mult = { k: 1e3, m: 1e6, b: 1e9 }[suffix] || 1;
             return Math.round(n * mult);
           };
-          const followers = content.match(/([\d.,]+[KMB]?)\s*Followers?/i);
-          const following = content.match(/([\d.,]+[KMB]?)\s*Following/i);
-          const posts     = content.match(/([\d.,]+[KMB]?)\s*Posts?/i);
+          const followers = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Followers?|seguidores)/i);
+          const following = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Following|seguidos)/i);
+          const posts     = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Posts?|publicaciones)/i);
           return {
             follower_count:  followers ? parseNum(followers[1]) : 0,
             following_count: following ? parseNum(following[1]) : 0,
