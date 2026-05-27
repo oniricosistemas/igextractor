@@ -754,6 +754,8 @@ async function navigateAndCapture(username, options = {}) {
 
   // Fallback: build user from og: meta tags if no user found yet, or fill missing counters
   try {
+    // Wait up to 5s for og:description to appear (needs JS to execute)
+    await page.waitForSelector('meta[property="og:description"]', { timeout: 5000 }).catch(() => {});
     const ogData = await page.evaluate((targetUsername) => {
       const desc  = document.querySelector('meta[property="og:description"]');
       const title = document.querySelector('meta[property="og:title"]');
