@@ -752,61 +752,82 @@ async function navigateAndCapture(username, options = {}) {
     }
   }
 
-  // If we have a user but counters are 0, try to read them from og:description meta tag
-  // e.g. "1.2M Followers, 300 Following, 4,500 Posts"
-  if (result.user) {
-    const hasCounters = (result.user.follower_count || result.user.following_count || result.user.media_count ||
-      (result.user.edge_followed_by && result.user.edge_followed_by.count) ||
-      (result.user.edge_follow && result.user.edge_follow.count) ||
-      (result.user.edge_owner_to_timeline_media && result.user.edge_owner_to_timeline_media.count));
-    if (!hasCounters) {
-      try {
-        const metaCounts = await page.evaluate(() => {
-          const og = document.querySelector('meta[property="og:description"]');
-          if (!og) return null;
-          const content = og.getAttribute('content') || '';
-          // "1.2M Followers, 456 Following, 789 Posts - ..." (EN or ES)
-          const parseNum = s => {
-            if (!s) return 0;
-            s = s.trim();
-            const m = s.match(/^([\d.,]+)\s*([KMBkmb]?)$/);
-            if (!m) return 0;
-            // Remove thousand separators: if suffix present, strip all dots/commas except decimal
-            // Strategy: if there's a suffix, just strip all non-digit except last dot/comma before digits
-            let numStr = m[1];
-            const suffix = m[2].toLowerCase();
-            if (suffix) {
-              // e.g. "8", "1.2", "47" — strip thousand seps
-              numStr = numStr.replace(/[.,](?=\d{3}$)/, ''); // "1.234" -> "1234" only if exactly 3 trailing digits
-              numStr = numStr.replace(/,/g, '');
-            } else {
-              // plain number like "47.000" or "1,234,567"
-              numStr = numStr.replace(/[.,](?=\d{3})/g, '');
-              numStr = numStr.replace(/,/g, '.');
-            }
-            const n = parseFloat(numStr) || 0;
-            const mult = { k: 1e3, m: 1e6, b: 1e9 }[suffix] || 1;
-            return Math.round(n * mult);
-          };
-          const followers = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Followers?|seguidores)/i);
-          const following = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Following|seguidos)/i);
-          const posts     = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Posts?|publicaciones)/i);
-          return {
-            follower_count:  followers ? parseNum(followers[1]) : 0,
-            following_count: following ? parseNum(following[1]) : 0,
-            media_count:     posts     ? parseNum(posts[1])     : 0,
-          };
-        });
-        if (metaCounts && (metaCounts.follower_count || metaCounts.following_count || metaCounts.media_count)) {
-          dbg('[capture] og:description fallback counts:', metaCounts);
-          result.user.follower_count  = metaCounts.follower_count;
-          result.user.following_count = metaCounts.following_count;
-          result.user.media_count     = metaCounts.media_count;
+  // Fallback: build user from og: meta tags if no user found yet, or fill missing counters
+  try {
+    const ogData = await page.evaluate((targetUsername) => {
+      const desc  = document.querySelector('meta[property="og:description"]');
+      const title = document.querySelector('meta[property="og:title"]');
+      const image = document.querySelector('meta[property="og:image"]');
+      return {
+        desc:     desc  ? desc.getAttribute('content')  : null,
+        title:    title ? title.getAttribute('content') : null,
+        image:    image ? image.getAttribute('content') : null,
+        pageUrl:  location.href,
+        username: targetUsername,
+      };
+    }, username);
+
+    if (ogData.desc || ogData.title) {
+      const parseNum = s => {
+        if (!s) return 0;
+        s = s.trim();
+        const m = s.match(/^([\d.,]+)\s*([KMBkmb]?)$/);
+        if (!m) return 0;
+        let numStr = m[1];
+        const suffix = m[2].toLowerCase();
+        if (suffix) {
+          numStr = numStr.replace(/[.,](?=\d{3}$)/, '');
+          numStr = numStr.replace(/,/g, '');
+        } else {
+          numStr = numStr.replace(/[.,](?=\d{3})/g, '');
+          numStr = numStr.replace(/,/g, '.');
         }
-      } catch (e) {
-        dbg('[capture] og:description fallback failed:', e && e.message);
+        const n = parseFloat(numStr) || 0;
+        const mult = { k: 1e3, m: 1e6, b: 1e9 }[suffix] || 1;
+        return Math.round(n * mult);
+      };
+
+      const content = ogData.desc || '';
+      const followers = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Followers?|seguidores)/i);
+      const following = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Following|seguidos)/i);
+      const posts     = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Posts?|publicaciones)/i);
+
+      const metaCounts = {
+        follower_count:  followers ? parseNum(followers[1]) : 0,
+        following_count: following ? parseNum(following[1]) : 0,
+        media_count:     posts     ? parseNum(posts[1])     : 0,
+      };
+
+      // Extract full_name from og:title — format: "Full Name (@username) • ..."
+      let full_name = '';
+      if (ogData.title) {
+        const nameMatch = ogData.title.match(/^(.+?)\s*\(@/);
+        if (nameMatch) full_name = nameMatch[1].trim();
+      }
+
+      if (!result.user) {
+        dbg('[capture] og fallback: building minimal user from meta tags');
+        result.user = {
+          username:    username,
+          full_name:   full_name,
+          pk:          null,
+          id:          null,
+          is_private:  false,
+          is_verified: false,
+          profile_pic_url: ogData.image || '',
+        };
+      }
+
+      if (metaCounts.follower_count || metaCounts.following_count || metaCounts.media_count) {
+        dbg('[capture] og fallback counts:', metaCounts);
+        result.user.follower_count  = result.user.follower_count  || metaCounts.follower_count;
+        result.user.following_count = result.user.following_count || metaCounts.following_count;
+        result.user.media_count     = result.user.media_count     || metaCounts.media_count;
+        if (!result.user.full_name && full_name) result.user.full_name = full_name;
       }
     }
+  } catch (e) {
+    dbg('[capture] og fallback failed:', e && e.message);
   }
 
   return result;
