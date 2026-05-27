@@ -830,6 +830,7 @@ async function navigateAndCapture(username, options = {}) {
     dbg('[capture] og fallback failed:', e && e.message);
   }
 
+  console.error('[DEBUG] navigateAndCapture result.user:', result.user ? JSON.stringify({ username: result.user.username, follower_count: result.user.follower_count, following_count: result.user.following_count, media_count: result.user.media_count, edge_followed_by: result.user.edge_followed_by }) : null);
   return result;
 }
 
