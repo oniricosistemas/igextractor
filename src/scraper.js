@@ -767,9 +767,9 @@ async function navigateAndCapture(username, options = {}) {
       };
     }, username);
 
+    console.error('[DEBUG] ogData:', JSON.stringify({ desc: ogData.desc, title: ogData.title, url: ogData.pageUrl }));
     if (ogData.desc || ogData.title) {
       const parseNum = s => {
-        if (!s) return 0;
         s = s.trim();
         const m = s.match(/^([\d.,]+)\s*([KMBkmb]?)$/);
         if (!m) return 0;
