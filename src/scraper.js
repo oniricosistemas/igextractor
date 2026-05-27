@@ -332,9 +332,11 @@ async function fetchProfileFromApi(username) {
       if (user && (user.pk || user.id)) {
         dbg('[profileApi] FOUND user via browser fetch:', user.username);
         return user;
+      } else {
+        console.error('[DEBUG] profileApi browser fetch: got json but no user. keys:', Object.keys(json).join(', '), '| json.data:', JSON.stringify(json.data)?.substring(0, 200));
       }
     } else {
-      dbg('[profileApi] browser fetch error:', json && json.error);
+      console.error('[DEBUG] profileApi browser fetch error:', json && json.error);
     }
   } catch (e) {
     dbg('[profileApi] browser fetch failed:', e.message);
