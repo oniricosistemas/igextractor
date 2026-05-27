@@ -297,6 +297,19 @@ async function fetchProfileFromApi(username) {
   try {
     const page = await getPage();
     dbg('[profileApi] trying browser fetch:', apiUrl);
+
+    // Inject sessionid cookie so the fetch is authenticated even on a cold browser
+    if (_sessionId) {
+      try {
+        await page.setCookie({
+          name: 'sessionid', value: _sessionId,
+          domain: '.instagram.com', path: '/', httpOnly: true, secure: true,
+        });
+      } catch (e) {
+        dbg('[profileApi] setCookie failed:', e.message);
+      }
+    }
+
     const json = await page.evaluate(async (url) => {
       try {
         const r = await fetch(url, {
