@@ -310,6 +310,13 @@ async function fetchProfileFromApi(username) {
       }
     }
 
+    // Navigate to instagram.com first so cookies apply (fetch is same-origin)
+    const currentUrl = page.url();
+    if (!currentUrl.includes('instagram.com')) {
+      dbg('[profileApi] navigating to instagram.com to establish origin');
+      await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+    }
+
     const json = await page.evaluate(async (url) => {
       try {
         const r = await fetch(url, {
