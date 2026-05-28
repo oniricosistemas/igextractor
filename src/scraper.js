@@ -76,8 +76,15 @@ function _walkForChrome(dir, depth) {
 async function launchBrowser() {
   if (_browser) return;
   const puppeteer = require('puppeteer');
+  const os = require('os');
+
+  // Persist browser profile so cookies survive between runs (critical for auth)
+  const userDataDir = path.join(os.homedir(), '.igextractor', 'browser-profile');
+  try { fs.mkdirSync(userDataDir, { recursive: true }); } catch (e) {}
+
   const launchOpts = {
     headless: 'new',
+    userDataDir,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
