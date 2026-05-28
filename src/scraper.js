@@ -567,9 +567,13 @@ async function navigateAndCapture(username, options = {}) {
       }
 
       const foundUser = deepFindUser(json, username);
-      if (foundUser && !result.user) {
-        dbg('[capture] FOUND USER via deep scan:', foundUser.username);
-        result.user = foundUser;
+      if (foundUser) {
+        const hasCounters = foundUser.follower_count != null || foundUser.edge_followed_by != null;
+        const currentHasCounters = result.user && (result.user.follower_count != null || result.user.edge_followed_by != null);
+        if (!result.user || (hasCounters && !currentHasCounters)) {
+          dbg('[capture] FOUND USER via deep scan (counters:', hasCounters, '):', foundUser.username);
+          result.user = foundUser;
+        }
       }
 
       function extractMedia(obj) {
@@ -1482,6 +1486,14 @@ async function runCaptionDownload(outputDir, allPosts, imageMap) {
 
 async function browserFetchJson(url) {
   const page = await getPage();
+
+  // Ensure we're on instagram.com so credentials: 'include' sends the session cookie
+  const currentUrl = page.url();
+  if (!currentUrl.includes('instagram.com')) {
+    dbg('[browserFetch] not on instagram.com, navigating first');
+    await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+  }
+
   const json = await page.evaluate(async (fetchUrl) => {
     try {
       const resp = await fetch(fetchUrl, {
