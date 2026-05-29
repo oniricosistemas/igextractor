@@ -76,15 +76,9 @@ function _walkForChrome(dir, depth) {
 async function launchBrowser() {
   if (_browser) return;
   const puppeteer = require('puppeteer');
-  const os = require('os');
-
-  // Persist browser profile so cookies survive between runs (critical for auth)
-  const userDataDir = path.join(os.homedir(), '.igextractor', 'browser-profile');
-  try { fs.mkdirSync(userDataDir, { recursive: true }); } catch (e) {}
 
   const launchOpts = {
     headless: 'new',
-    userDataDir,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -621,7 +615,9 @@ async function navigateAndCapture(username, options = {}) {
   }
 
   dbg('[capture] navigating to profile');
-  await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'networkidle2', timeout: 35000 });
+  await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
+  // Give JS/XHR a moment to fire after DOM is ready
+  await sleep(3000);
 
   try {
     const diagInfo = await page.evaluate(() => ({
@@ -1408,6 +1404,7 @@ async function runMediaDownload(outputDir, allPosts, limit, wantPhotos, wantReel
             ts: postTs || null,
             type: postIsReel ? 'reel' : (isCarousel ? 'carousel' : 'photo'),
             url: firstDownloadedUrl,
+            caption: getCaptionText(post) || null,
             grid_index: gridIndex !== null && gridIndex !== undefined ? gridIndex : null,
             feed_source: (gridIndex !== null && gridIndex !== undefined) ? 'grid' : 'feed',
             ...(isCarousel ? { item_count: items.length } : {})
