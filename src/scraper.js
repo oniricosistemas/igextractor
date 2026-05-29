@@ -148,11 +148,6 @@ async function getPage() {
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
   );
   
-  try {
-    await _page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await sleep(1000);
-  } catch {}
-
   if (_sessionId) {
     await _page.setCookie({
       name: 'sessionid', value: _sessionId,
@@ -161,17 +156,13 @@ async function getPage() {
     });
     dbg('[getPage] sessionid cookie set. All cookies:', (await _page.cookies()).map(c => c.name).join(', '));
     try {
-      await _page.goto('https://www.instagram.com/', { waitUntil: 'networkidle2', timeout: 30000 });
-      await sleep(2000);
-      await _page.evaluate(() => window.scrollBy(0, 400));
-      await sleep(1000);
+      await _page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await sleep(1500);
     } catch {}
   } else {
     try {
-      await _page.goto('https://www.instagram.com/', { waitUntil: 'networkidle2', timeout: 30000 });
-      await sleep(3000);
-      await _page.evaluate(() => window.scrollBy(0, 400));
-      await sleep(1000);
+      await _page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await sleep(1500);
     } catch {}
   }
 
