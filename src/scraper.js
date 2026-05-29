@@ -607,7 +607,11 @@ async function navigateAndCapture(username, options = {}) {
 
   dbg('[capture] navigating to profile');
   try {
+    const cookiesBefore = await page.cookies('https://www.instagram.com');
+    console.error('[DEBUG][cookies] before goto:', cookiesBefore.map(c => c.name + '=' + c.value.substring(0,8) + '...').join(', '));
     await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
+    const cookiesAfter = await page.cookies('https://www.instagram.com');
+    console.error('[DEBUG][cookies] after goto:', cookiesAfter.map(c => c.name).join(', '));
   } catch (gotoErr) {
     console.error('[DEBUG] goto failed:', gotoErr.message);
   }
