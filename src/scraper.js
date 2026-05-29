@@ -145,21 +145,25 @@ async function getPage() {
   });
 
   await _page.setUserAgent(
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
   );
   
+  // Step 1: navigate to instagram.com without session so browser gets baseline cookies (csrftoken, mid, etc.)
+  try {
+    await _page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await sleep(1500);
+  } catch {}
+
   if (_sessionId) {
+    // Step 2: inject sessionid AFTER baseline navigation so Instagram sees it as a cookie update, not a foreign cookie
     await _page.setCookie({
       name: 'sessionid', value: _sessionId,
       domain: '.instagram.com', path: '/',
       httpOnly: true, secure: true,
+      sameSite: 'Lax',
     });
     dbg('[getPage] sessionid cookie set. All cookies:', (await _page.cookies()).map(c => c.name).join(', '));
-    try {
-      await _page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await sleep(1500);
-    } catch {}
-  } else {
+    // Step 3: reload so Instagram picks up the session
     try {
       await _page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 });
       await sleep(1500);
