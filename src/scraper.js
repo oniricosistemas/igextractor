@@ -615,7 +615,11 @@ async function navigateAndCapture(username, options = {}) {
   }
 
   dbg('[capture] navigating to profile');
-  await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
+  try {
+    await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
+  } catch (gotoErr) {
+    console.error('[DEBUG] goto failed:', gotoErr.message);
+  }
   // Give JS/XHR a moment to fire after DOM is ready
   await sleep(3000);
 
@@ -627,14 +631,12 @@ async function navigateAndCapture(username, options = {}) {
       scriptCount: document.querySelectorAll('script').length,
       scriptTypes: Array.from(document.querySelectorAll('script[type]')).map(s => s.type).join(', '),
     }));
-    dbg('[capture][diag] title:', diagInfo.title);
-    dbg('[capture][diag] url:', diagInfo.url);
-    dbg('[capture][diag] scriptCount:', diagInfo.scriptCount, '| types:', diagInfo.scriptTypes);
-    dbg('[capture][diag] html snippet:', diagInfo.htmlSnippet.substring(0, 500));
-    require('fs').writeFileSync('C:/Users/HP/AppData/Local/Temp/ig_diag.html', diagInfo.htmlSnippet);
-    dbg('[capture][diag] full snippet saved to C:/Users/HP/AppData/Local/Temp/ig_diag.html');
+    console.error('[DEBUG][diag] title:', diagInfo.title);
+    console.error('[DEBUG][diag] url:', diagInfo.url);
+    console.error('[DEBUG][diag] scriptCount:', diagInfo.scriptCount);
+    console.error('[DEBUG][diag] html[:300]:', diagInfo.htmlSnippet.substring(0, 300));
   } catch (e) {
-    dbg('[capture][diag] failed:', e.message);
+    console.error('[DEBUG][diag] failed:', e.message);
   }
 
   try {
