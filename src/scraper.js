@@ -624,17 +624,12 @@ async function navigateAndCapture(username, options = {}) {
   await sleep(3000);
 
   try {
-    const diagInfo = await page.evaluate(() => ({
-      title: document.title,
-      url: location.href,
-      htmlSnippet: document.documentElement.innerHTML.substring(0, 3000),
-      scriptCount: document.querySelectorAll('script').length,
-      scriptTypes: Array.from(document.querySelectorAll('script[type]')).map(s => s.type).join(', '),
-    }));
-    console.error('[DEBUG][diag] title:', diagInfo.title);
-    console.error('[DEBUG][diag] url:', diagInfo.url);
-    console.error('[DEBUG][diag] scriptCount:', diagInfo.scriptCount);
-    console.error('[DEBUG][diag] html[:300]:', diagInfo.htmlSnippet.substring(0, 300));
+    const diagUrl   = page.url();
+    const diagTitle = await page.title().catch(() => '?');
+    console.error('[DEBUG][diag] url:', diagUrl);
+    console.error('[DEBUG][diag] title:', diagTitle);
+    const diagHtml = await page.content().catch(() => '');
+    console.error('[DEBUG][diag] html[:500]:', diagHtml.substring(0, 500));
   } catch (e) {
     console.error('[DEBUG][diag] failed:', e.message);
   }
