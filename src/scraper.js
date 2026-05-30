@@ -263,11 +263,27 @@ async function fetchProfileFromApi(username) {
   if (!_sessionId) return null;
   const apiUrl = `${IG_BASE}/api/v1/users/web_profile_info/?username=${username}`;
 
+  // Collect baseline cookies from the browser (csrftoken, mid, ig_did, datr, etc.)
+  // These are required alongside sessionid to avoid 429s on direct API calls
+  let cookieHeader = `sessionid=${_sessionId}`;
+  try {
+    const page = await getPage();
+    const cookies = await page.cookies('https://www.instagram.com');
+    const cookieMap = {};
+    for (const c of cookies) cookieMap[c.name] = c.value;
+    // Always override sessionid with ours, merge the rest
+    cookieMap['sessionid'] = _sessionId;
+    cookieHeader = Object.entries(cookieMap).map(([k, v]) => `${k}=${v}`).join('; ');
+    dbg('[profileApi] cookie header built with:', Object.keys(cookieMap).join(', '));
+  } catch (e) {
+    dbg('[profileApi] could not get browser cookies, using sessionid only:', e.message);
+  }
+
   try {
     dbg('[profileApi] trying axios:', apiUrl);
     const resp = await axios.get(apiUrl, {
       headers: {
-        'Cookie': `sessionid=${_sessionId}`,
+        'Cookie': cookieHeader,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
         'Accept': '*/*',
         'Accept-Language': 'es-AR,es;q=0.9,en;q=0.8',
