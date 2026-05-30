@@ -268,7 +268,7 @@ async function fetchProfileFromApi(username) {
     const resp = await axios.get(apiUrl, {
       headers: {
         'Cookie': `sessionid=${_sessionId}`,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
         'Accept': '*/*',
         'Accept-Language': 'es-AR,es;q=0.9,en;q=0.8',
         'X-IG-App-ID': '936619743392459',
@@ -277,6 +277,7 @@ async function fetchProfileFromApi(username) {
       },
       timeout: 15000,
     });
+    console.error('[DEBUG] profileApi axios status:', resp.status, 'keys:', Object.keys(resp.data || {}).join(', '));
     const json = resp.data;
     if (typeof json === 'object' && json) {
       dbg('[profileApi] axios response keys:', Object.keys(json).join(', '));
@@ -287,7 +288,7 @@ async function fetchProfileFromApi(username) {
       }
     }
   } catch (e) {
-    dbg('[profileApi] axios failed:', e.message, '— will retry via browser fetch');
+    console.error('[DEBUG] profileApi axios failed:', e.message, 'status:', e.response && e.response.status);
   }
 
   try {
