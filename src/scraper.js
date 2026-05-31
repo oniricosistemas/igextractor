@@ -976,7 +976,7 @@ async function downloadFile(url, dest) {
 }
 
 async function fetchProfileOnly(username, options) {
-  _sessionId = (options && options.sessionId) || '';
+  _sessionId = decodeURIComponent((options && options.sessionId) || '');
   const spinner = ui.createSpinner(t('spinLaunching'));
   spinner.start();
   try {
@@ -994,7 +994,7 @@ async function fetchProfileOnly(username, options) {
 async function extractProfile(username, options = {}) {
   options.username = username;
   const pro = isPro();
-  _sessionId = options.sessionId || process.env.IG_SESSION_ID || '';
+  _sessionId = decodeURIComponent(options.sessionId || process.env.IG_SESSION_ID || '');
   dbg('[extractProfile] _sessionId length:', _sessionId.length, 'options.sessionId length:', (options.sessionId||'').length);
   
   const planMax      = pro ? Infinity : FREE_LIMIT;
