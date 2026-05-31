@@ -630,7 +630,17 @@ async function navigateAndCapture(username, options = {}) {
   try {
     const cookiesBefore = await page.cookies('https://www.instagram.com');
     console.error('[DEBUG][cookies] before goto:', cookiesBefore.map(c => c.name + '=' + c.value.substring(0,8) + '...').join(', '));
+    // Try navigating without sessionid first to see if Instagram at least serves the public profile
     await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
+    const urlAfter = page.url();
+    console.error('[DEBUG] url after goto:', urlAfter);
+    // If redirected to home, try again with sessionid explicitly in URL params (some regions require this)
+    if (!urlAfter.includes(`/${username}`)) {
+      console.error('[DEBUG] redirected to home - retrying after 3s delay');
+      await sleep(3000);
+      await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
+      console.error('[DEBUG] url after retry:', page.url());
+    }
     const cookiesAfter = await page.cookies('https://www.instagram.com');
     console.error('[DEBUG][cookies] after goto:', cookiesAfter.map(c => c.name).join(', '));
   } catch (gotoErr) {
