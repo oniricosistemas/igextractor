@@ -628,37 +628,18 @@ async function navigateAndCapture(username, options = {}) {
 
   dbg('[capture] navigating to profile');
   try {
-    const cookiesBefore = await page.cookies('https://www.instagram.com');
-    console.error('[DEBUG][cookies] before goto:', cookiesBefore.map(c => c.name + '=' + c.value.substring(0,8) + '...').join(', '));
-    // Try navigating without sessionid first to see if Instagram at least serves the public profile
     await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
-    const urlAfter = page.url();
-    console.error('[DEBUG] url after goto:', urlAfter);
-    // If redirected to home, try again with sessionid explicitly in URL params (some regions require this)
-    if (!urlAfter.includes(`/${username}`)) {
-      console.error('[DEBUG] redirected to home - retrying after 3s delay');
+    // If redirected to home (bot detection), wait and retry once
+    if (!page.url().includes(`/${username}`)) {
+      dbg('[capture] redirected to home, retrying after 3s');
       await sleep(3000);
       await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
-      console.error('[DEBUG] url after retry:', page.url());
     }
-    const cookiesAfter = await page.cookies('https://www.instagram.com');
-    console.error('[DEBUG][cookies] after goto:', cookiesAfter.map(c => c.name).join(', '));
   } catch (gotoErr) {
     console.error('[DEBUG] goto failed:', gotoErr.message);
   }
   // Give JS/XHR a moment to fire after DOM is ready
   await sleep(3000);
-
-  try {
-    const diagUrl   = page.url();
-    const diagTitle = await page.title().catch(() => '?');
-    console.error('[DEBUG][diag] url:', diagUrl);
-    console.error('[DEBUG][diag] title:', diagTitle);
-    const diagHtml = await page.content().catch(() => '');
-    console.error('[DEBUG][diag] html[:500]:', diagHtml.substring(0, 500));
-  } catch (e) {
-    console.error('[DEBUG][diag] failed:', e.message);
-  }
 
   try {
     const loginRedirect = await page.evaluate((u) => {
@@ -821,7 +802,7 @@ async function navigateAndCapture(username, options = {}) {
       };
     }, username);
 
-    console.error('[DEBUG] ogData:', JSON.stringify({ desc: ogData.desc, title: ogData.title, url: ogData.pageUrl }));
+    dbg('[capture] ogData url:', ogData.pageUrl, 'desc:', ogData.desc ? ogData.desc.substring(0, 80) : null);
     if (ogData.desc || ogData.title) {
       const parseNum = s => {
         s = s.trim();
@@ -884,7 +865,7 @@ async function navigateAndCapture(username, options = {}) {
     dbg('[capture] og fallback failed:', e && e.message);
   }
 
-  console.error('[DEBUG] navigateAndCapture result.user:', result.user ? JSON.stringify({ username: result.user.username, follower_count: result.user.follower_count, following_count: result.user.following_count, media_count: result.user.media_count, edge_followed_by: result.user.edge_followed_by }) : null);
+  dbg('[capture] result.user:', result.user ? result.user.username : null);
   return result;
 }
 
@@ -1514,29 +1495,29 @@ async function runCaptionDownload(outputDir, allPosts, imageMap) {
 async function browserFetchJson(url) {
   const page = await getPage();
 
-  // Ensure we're on instagram.com so credentials: 'include' sends the session cookie
+  // Ensure we're on instagram.com for same-origin fetch
   const currentUrl = page.url();
   if (!currentUrl.includes('instagram.com')) {
     dbg('[browserFetch] not on instagram.com, navigating first');
     await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
   }
 
-  const json = await page.evaluate(async (fetchUrl) => {
+  const json = await page.evaluate(async (fetchUrl, sessionId) => {
     try {
-      const resp = await fetch(fetchUrl, {
-        headers: {
-          'Accept':           'application/json, text/plain, */*',
-          'X-IG-App-ID':      '936619743392459',
-          'X-Requested-With': 'XMLHttpRequest',
-        },
-        credentials: 'include',
-      });
+      const headers = {
+        'Accept':           'application/json, text/plain, */*',
+        'X-IG-App-ID':      '936619743392459',
+        'X-Requested-With': 'XMLHttpRequest',
+      };
+      // Pass sessionid explicitly as header - don't rely on browser cookie store
+      if (sessionId) headers['Cookie'] = `sessionid=${sessionId}`;
+      const resp = await fetch(fetchUrl, { headers, credentials: 'include' });
       if (!resp.ok) return { __error: resp.status };
       return await resp.json();
     } catch (e) {
       return { __error: e.message };
     }
-  }, url);
+  }, url, _sessionId);
   return json;
 }
 
