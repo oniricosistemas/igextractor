@@ -1501,6 +1501,7 @@ async function browserFetchJson(url) {
     dbg('[browserFetch] not on instagram.com, navigating first');
     await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
   }
+  console.error('[DEBUG][browserFetch] page url:', page.url().substring(0, 60), '| sessionId len:', _sessionId.length);
 
   const json = await page.evaluate(async (fetchUrl, sessionId) => {
     try {
@@ -1518,6 +1519,7 @@ async function browserFetchJson(url) {
       return { __error: e.message };
     }
   }, url, _sessionId);
+  console.error('[DEBUG][browserFetch] url:', url.substring(0, 80), '| result:', json ? (json.__error ? 'error:' + json.__error : 'ok keys:' + Object.keys(json).join(',')) : 'null');
   return json;
 }
 
@@ -1575,6 +1577,7 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
       dbg('[comments] post', code, '->', postComments.length, 'comments');
     } catch (e) {
       spinner.fail(`Post ${code}: error`);
+      console.error('[DEBUG][comments] catch:', e.message);
       dbg('[comments] error for', code, e.message);
       commentsMap[code] = [];
     }
@@ -1701,6 +1704,7 @@ async function runFollowersDownload(outputDir, profileData) {
       if (hasMore) await sleep(1500);
     }
   } catch (e) {
+    console.error('[DEBUG][followers] catch:', e.message);
     dbg('[followers] error:', e.message);
   }
 
