@@ -629,36 +629,32 @@ async function navigateAndCapture(username, options = {}) {
   dbg('[capture] navigating to profile');
   try {
     await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
-    // If redirected to home or login (bot detection), re-inject session and retry once
-    const urlAfter = page.url();
-    if (!urlAfter.includes(`/${username}`) || urlAfter.includes('/accounts/login')) {
-      dbg('[capture] redirected away from profile, retrying after 3s. url:', urlAfter);
-      console.error('[DEBUG] goto1 url:', urlAfter.substring(0, 80));
-      await sleep(3000);
-      // Re-inject sessionid before retry
-      if (_sessionId) {
-        await page.setCookie({ name: 'sessionid', value: _sessionId, domain: '.instagram.com', path: '/', httpOnly: true, secure: true }).catch(() => {});
-      }
+    // If redirected away from profile (bot detection), wait longer and retry once
+    if (!page.url().includes(`/${username}`)) {
+      dbg('[capture] redirected, retrying after 5s. url:', page.url());
+      await sleep(5000);
       await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
-      console.error('[DEBUG] goto2 url:', page.url().substring(0, 80));
+      dbg('[capture] retry url:', page.url());
     }
   } catch (gotoErr) {
-    console.error('[DEBUG] goto failed:', gotoErr.message);
+    dbg('[capture] goto failed:', gotoErr.message);
   }
   // Give JS/XHR a moment to fire after DOM is ready
   await sleep(3000);
 
+  // Skip login-redirect check if we reached the profile page
+  const finalUrl = page.url();
+  if (!finalUrl.includes(`/${username}`)) {
   try {
-    const loginRedirect = await page.evaluate((u) => {
+    const loginRedirect = await page.evaluate(() => {
       const url = location.href;
       const title = document.title;
       const html = document.documentElement.innerHTML;
       const isLoginUrl = url.includes('/accounts/login');
       const isLoginTitle = title === 'Log in • Instagram' || title === 'Instagram - Log in';
-      // Only trigger on actual login form presence (input with name="username" inside a form)
       const hasLoginForm = document.querySelector('form input[name="username"]') !== null;
       return (isLoginUrl || isLoginTitle || hasLoginForm) ? { url, title, html } : null;
-    }, username);
+    });
 
     if (loginRedirect && options.debug) {
       dbg('[capture] LOGIN REDIRECT DETECTED');
@@ -673,6 +669,7 @@ async function navigateAndCapture(username, options = {}) {
   } catch (e) {
     if (e.message === 'login-redirect') throw e;
     dbg('[capture][login-detect] error:', e.message);
+  }
   }
 
   const start = Date.now();
