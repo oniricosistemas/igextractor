@@ -1495,31 +1495,49 @@ async function runCaptionDownload(outputDir, allPosts, imageMap) {
 async function browserFetchJson(url) {
   const page = await getPage();
 
+  // Re-inject sessionid cookie before every fetch - browser loses it after navigation
+  if (_sessionId) {
+    await page.setCookie({
+      name: 'sessionid', value: _sessionId,
+      domain: '.instagram.com', path: '/', httpOnly: true, secure: true,
+    }).catch(() => {});
+  }
+
   // Ensure we're on instagram.com for same-origin fetch
   const currentUrl = page.url();
-  if (!currentUrl.includes('instagram.com')) {
-    dbg('[browserFetch] not on instagram.com, navigating first');
+  if (!currentUrl.includes('instagram.com') || currentUrl.includes('/accounts/login')) {
+    dbg('[browserFetch] not on instagram.com or on login page, navigating first');
     await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+    // Re-inject after navigation
+    if (_sessionId) {
+      await page.setCookie({
+        name: 'sessionid', value: _sessionId,
+        domain: '.instagram.com', path: '/', httpOnly: true, secure: true,
+      }).catch(() => {});
+    }
   }
-  console.error('[DEBUG][browserFetch] page url:', page.url().substring(0, 60), '| sessionId len:', _sessionId.length);
 
-  const json = await page.evaluate(async (fetchUrl, sessionId) => {
+  // Build cookie string from all current page cookies
+  const allCookies = await page.cookies('https://www.instagram.com').catch(() => []);
+  const cookieHeader = allCookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+  const json = await page.evaluate(async (fetchUrl, cookieStr) => {
     try {
-      const headers = {
-        'Accept':           'application/json, text/plain, */*',
-        'X-IG-App-ID':      '936619743392459',
-        'X-Requested-With': 'XMLHttpRequest',
-      };
-      // Pass sessionid explicitly as header - don't rely on browser cookie store
-      if (sessionId) headers['Cookie'] = `sessionid=${sessionId}`;
-      const resp = await fetch(fetchUrl, { headers, credentials: 'include' });
+      const resp = await fetch(fetchUrl, {
+        headers: {
+          'Accept':           'application/json, text/plain, */*',
+          'X-IG-App-ID':      '936619743392459',
+          'X-Requested-With': 'XMLHttpRequest',
+          'Cookie':           cookieStr,
+        },
+        credentials: 'include',
+      });
       if (!resp.ok) return { __error: resp.status };
       return await resp.json();
     } catch (e) {
       return { __error: e.message };
     }
-  }, url, _sessionId);
-  console.error('[DEBUG][browserFetch] url:', url.substring(0, 80), '| result:', json ? (json.__error ? 'error:' + json.__error : 'ok keys:' + Object.keys(json).join(',')) : 'null');
+  }, url, cookieHeader);
   return json;
 }
 
@@ -1555,7 +1573,7 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
         const endpoint = `${IG_BASE}/api/v1/media/${mediaId}/comments/?${params}`;
         dbg('[comments] browser fetch', endpoint);
         const json = await browserFetchJson(endpoint);
-        if (!json || json.__error) { dbg('[comments] API error:', json && json.__error); console.error('[DEBUG][comments] error for', code, ':', json && json.__error); break; }
+      if (!json || json.__error) { dbg('[comments] API error:', json && json.__error); break; }
         const items = json.comments || [];
         for (const c of items) {
           postComments.push({
@@ -1577,7 +1595,6 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
       dbg('[comments] post', code, '->', postComments.length, 'comments');
     } catch (e) {
       spinner.fail(`Post ${code}: error`);
-      console.error('[DEBUG][comments] catch:', e.message);
       dbg('[comments] error for', code, e.message);
       commentsMap[code] = [];
     }
@@ -1692,7 +1709,7 @@ async function runFollowersDownload(outputDir, profileData) {
       const endpoint = `${IG_BASE}/api/v1/friendships/${userId}/followers/?${params}`;
       dbg('[followers] browser fetch', endpoint);
       const json = await browserFetchJson(endpoint);
-      if (!json || json.__error) { dbg('[followers] API error:', json && json.__error); console.error('[DEBUG][followers] error:', json && json.__error); break; }
+      if (!json || json.__error) { dbg('[followers] API error:', json && json.__error); break; }
       const users = json.users || [];
       for (const u of users) {
         results.push({ pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
@@ -1704,7 +1721,6 @@ async function runFollowersDownload(outputDir, profileData) {
       if (hasMore) await sleep(1500);
     }
   } catch (e) {
-    console.error('[DEBUG][followers] catch:', e.message);
     dbg('[followers] error:', e.message);
   }
 
@@ -1731,7 +1747,7 @@ async function runFollowingDownload(outputDir, profileData) {
       const endpoint = `${IG_BASE}/api/v1/friendships/${userId}/following/?${params}`;
       dbg('[following] browser fetch', endpoint);
       const json = await browserFetchJson(endpoint);
-      if (!json || json.__error) { dbg('[following] API error:', json && json.__error); console.error('[DEBUG][following] error:', json && json.__error); break; }
+      if (!json || json.__error) { dbg('[following] API error:', json && json.__error); break; }
       const users = json.users || [];
       for (const u of users) {
         results.push({ pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
