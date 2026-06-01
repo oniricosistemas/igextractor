@@ -629,11 +629,18 @@ async function navigateAndCapture(username, options = {}) {
   dbg('[capture] navigating to profile');
   try {
     await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
-    // If redirected to home (bot detection), wait and retry once
-    if (!page.url().includes(`/${username}`)) {
-      dbg('[capture] redirected to home, retrying after 3s');
+    // If redirected to home or login (bot detection), re-inject session and retry once
+    const urlAfter = page.url();
+    if (!urlAfter.includes(`/${username}`) || urlAfter.includes('/accounts/login')) {
+      dbg('[capture] redirected away from profile, retrying after 3s. url:', urlAfter);
+      console.error('[DEBUG] goto1 url:', urlAfter.substring(0, 80));
       await sleep(3000);
+      // Re-inject sessionid before retry
+      if (_sessionId) {
+        await page.setCookie({ name: 'sessionid', value: _sessionId, domain: '.instagram.com', path: '/', httpOnly: true, secure: true }).catch(() => {});
+      }
       await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
+      console.error('[DEBUG] goto2 url:', page.url().substring(0, 80));
     }
   } catch (gotoErr) {
     console.error('[DEBUG] goto failed:', gotoErr.message);
