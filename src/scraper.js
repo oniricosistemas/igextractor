@@ -1553,7 +1553,7 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
         const endpoint = `${IG_BASE}/api/v1/media/${mediaId}/comments/?${params}`;
         dbg('[comments] browser fetch', endpoint);
         const json = await browserFetchJson(endpoint);
-        if (!json || json.__error) { dbg('[comments] API error:', json && json.__error); break; }
+        if (!json || json.__error) { dbg('[comments] API error:', json && json.__error); console.error('[DEBUG][comments] error for', code, ':', json && json.__error); break; }
         const items = json.comments || [];
         for (const c of items) {
           postComments.push({
@@ -1689,7 +1689,7 @@ async function runFollowersDownload(outputDir, profileData) {
       const endpoint = `${IG_BASE}/api/v1/friendships/${userId}/followers/?${params}`;
       dbg('[followers] browser fetch', endpoint);
       const json = await browserFetchJson(endpoint);
-      if (!json || json.__error) { dbg('[followers] API error:', json && json.__error); break; }
+      if (!json || json.__error) { dbg('[followers] API error:', json && json.__error); console.error('[DEBUG][followers] error:', json && json.__error); break; }
       const users = json.users || [];
       for (const u of users) {
         results.push({ pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
@@ -1727,7 +1727,7 @@ async function runFollowingDownload(outputDir, profileData) {
       const endpoint = `${IG_BASE}/api/v1/friendships/${userId}/following/?${params}`;
       dbg('[following] browser fetch', endpoint);
       const json = await browserFetchJson(endpoint);
-      if (!json || json.__error) { dbg('[following] API error:', json && json.__error); break; }
+      if (!json || json.__error) { dbg('[following] API error:', json && json.__error); console.error('[DEBUG][following] error:', json && json.__error); break; }
       const users = json.users || [];
       for (const u of users) {
         results.push({ pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
