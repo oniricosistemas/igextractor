@@ -1525,23 +1525,29 @@ async function browserFetchJson(url) {
   const allCookies = await page.cookies('https://www.instagram.com').catch(() => []);
   const cookieHeader = allCookies.map(c => `${c.name}=${c.value}`).join('; ');
 
-  const json = await page.evaluate(async (fetchUrl, cookieStr) => {
-    try {
-      const resp = await fetch(fetchUrl, {
-        headers: {
-          'Accept':           'application/json, text/plain, */*',
-          'X-IG-App-ID':      '936619743392459',
-          'X-Requested-With': 'XMLHttpRequest',
-          'Cookie':           cookieStr,
-        },
-        credentials: 'include',
-      });
-      if (!resp.ok) return { __error: resp.status };
-      return await resp.json();
-    } catch (e) {
-      return { __error: e.message };
-    }
-  }, url, cookieHeader);
+  let json;
+  try {
+    json = await page.evaluate(async (fetchUrl, cookieStr) => {
+      try {
+        const resp = await fetch(fetchUrl, {
+          headers: {
+            'Accept':           'application/json, text/plain, */*',
+            'X-IG-App-ID':      '936619743392459',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Cookie':           cookieStr,
+          },
+          credentials: 'include',
+        });
+        if (!resp.ok) return { __error: resp.status };
+        return await resp.json();
+      } catch (e) {
+        return { __error: e.message };
+      }
+    }, url, cookieHeader);
+  } catch (evalErr) {
+    console.error('[DEBUG][browserFetch] evaluate threw:', evalErr.message, '| url:', url.substring(0, 80));
+    return { __error: evalErr.message };
+  }
   return json;
 }
 
