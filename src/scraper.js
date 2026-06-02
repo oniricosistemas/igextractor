@@ -1525,27 +1525,31 @@ async function browserFetchJson(url) {
   const allCookies = await page.cookies('https://www.instagram.com').catch(() => []);
   const cookieHeader = allCookies.map(c => `${c.name}=${c.value}`).join('; ');
 
+  // Use addScriptTag + window variable approach to avoid pkg serialization issues with async functions
   let json;
   try {
-    json = await page.evaluate(async (fetchUrl, cookieStr) => {
-      try {
-        const resp = await fetch(fetchUrl, {
-          headers: {
-            'Accept':           'application/json, text/plain, */*',
-            'X-IG-App-ID':      '936619743392459',
-            'X-Requested-With': 'XMLHttpRequest',
-            'Cookie':           cookieStr,
-          },
-          credentials: 'include',
-        });
-        if (!resp.ok) return { __error: resp.status };
-        return await resp.json();
-      } catch (e) {
-        return { __error: e.message };
-      }
-    }, url, cookieHeader);
+    await page.evaluate(`window.__igx_fetch_url = ${JSON.stringify(url)}; window.__igx_fetch_cookie = ${JSON.stringify(cookieHeader)};`);
+    json = await page.evaluate(`
+      (async () => {
+        try {
+          const resp = await fetch(window.__igx_fetch_url, {
+            headers: {
+              'Accept': 'application/json, text/plain, */*',
+              'X-IG-App-ID': '936619743392459',
+              'X-Requested-With': 'XMLHttpRequest',
+              'Cookie': window.__igx_fetch_cookie,
+            },
+            credentials: 'include',
+          });
+          if (!resp.ok) return { __error: resp.status };
+          return await resp.json();
+        } catch (e) {
+          return { __error: e.message };
+        }
+      })()
+    `);
   } catch (evalErr) {
-    console.error('[DEBUG][browserFetch] evaluate threw:', evalErr.message, '| url:', url.substring(0, 80));
+    dbg('[browserFetch] evaluate threw:', evalErr.message);
     return { __error: evalErr.message };
   }
   return json;
