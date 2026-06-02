@@ -1499,7 +1499,7 @@ async function runCaptionDownload(outputDir, allPosts, imageMap) {
 async function browserFetchJson(url) {
   const page = await getPage();
 
-  // Re-inject sessionid cookie before every fetch - browser loses it after navigation
+  // 1. Force re-injection of sessionid cookie
   if (_sessionId) {
     await page.setCookie({
       name: 'sessionid', value: _sessionId,
@@ -1507,28 +1507,17 @@ async function browserFetchJson(url) {
     }).catch(() => {});
   }
 
-  // Ensure we're on instagram.com for same-origin fetch
+  // 2. Ensure we are on instagram.com domain
   const currentUrl = page.url();
-  if (!currentUrl.includes('instagram.com') || currentUrl.includes('/accounts/login')) {
-    dbg('[browserFetch] not on instagram.com or on login page, navigating first');
+  if (!currentUrl.includes('instagram.com')) {
     await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-    // Re-inject after navigation
-    if (_sessionId) {
-      await page.setCookie({
-        name: 'sessionid', value: _sessionId,
-        domain: '.instagram.com', path: '/', httpOnly: true, secure: true,
-      }).catch(() => {});
-    }
   }
 
-  // Build cookie string from all current page cookies
-  const allCookies = await page.cookies('https://www.instagram.com').catch(() => []);
-  const cookieHeader = allCookies.map(c => `${c.name}=${c.value}`).join('; ');
-
-  // Use addScriptTag + window variable approach to avoid pkg serialization issues with async functions
+  // 3. Use internal fetch without manual Cookie header (let the browser use its stored cookies)
+  // We use window.fetch directly. Since we just set the cookie, it's available in the browser context.
   let json;
   try {
-    await page.evaluate(`window.__igx_fetch_url = ${JSON.stringify(url)}; window.__igx_fetch_cookie = ${JSON.stringify(cookieHeader)};`);
+    await page.evaluate(`window.__igx_fetch_url = ${JSON.stringify(url)};`);
     json = await page.evaluate(`
       (async () => {
         try {
@@ -1537,7 +1526,6 @@ async function browserFetchJson(url) {
               'Accept': 'application/json, text/plain, */*',
               'X-IG-App-ID': '936619743392459',
               'X-Requested-With': 'XMLHttpRequest',
-              'Cookie': window.__igx_fetch_cookie,
             },
             credentials: 'include',
           });
