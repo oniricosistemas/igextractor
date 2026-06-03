@@ -1499,22 +1499,22 @@ async function runCaptionDownload(outputDir, allPosts, imageMap) {
 async function browserFetchJson(url) {
   const page = await getPage();
 
-  // 1. Force re-injection of sessionid cookie
+  // 1. Precise Session Warmup
   if (_sessionId) {
+    // First, ensure we are on the domain
+    if (!page.url().includes('instagram.com')) {
+      await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+    }
+    // Inject sessionid
     await page.setCookie({
       name: 'sessionid', value: _sessionId,
       domain: '.instagram.com', path: '/', httpOnly: true, secure: true,
     }).catch(() => {});
+    // Reload to activate session
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+    await sleep(2000); 
   }
 
-  // 2. Ensure we are on instagram.com domain
-  const currentUrl = page.url();
-  if (!currentUrl.includes('instagram.com')) {
-    await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-  }
-
-  // 3. Use internal fetch without manual Cookie header (let the browser use its stored cookies)
-  // We use window.fetch directly. Since we just set the cookie, it's available in the browser context.
   let json;
   try {
     await page.evaluate(`window.__igx_fetch_url = ${JSON.stringify(url)};`);
@@ -1529,8 +1529,13 @@ async function browserFetchJson(url) {
             },
             credentials: 'include',
           });
-          if (!resp.ok) return { __error: resp.status };
-          return await resp.json();
+          if (!resp.ok) return { __error: resp.status, __statusText: resp.statusText };
+          const text = await resp.text();
+          try {
+            return JSON.parse(text);
+          } catch {
+            return { __error: 'JSON_PARSE_FAIL', __body: text.substring(0, 200) };
+          }
         } catch (e) {
           return { __error: e.message };
         }
