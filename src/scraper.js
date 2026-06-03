@@ -1499,20 +1499,17 @@ async function runCaptionDownload(outputDir, allPosts, imageMap) {
 async function browserFetchJson(url) {
   const page = await getPage();
 
-  // 1. Precise Session Warmup
+  // Quick inject sessionid if not present
   if (_sessionId) {
-    // First, ensure we are on the domain
-    if (!page.url().includes('instagram.com')) {
-      await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-    }
-    // Inject sessionid
     await page.setCookie({
       name: 'sessionid', value: _sessionId,
       domain: '.instagram.com', path: '/', httpOnly: true, secure: true,
     }).catch(() => {});
-    // Reload to activate session
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-    await sleep(2000); 
+  }
+
+  // Ensure we're on instagram.com domain
+  if (!page.url().includes('instagram.com')) {
+    await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
   }
 
   let json;
@@ -1529,12 +1526,13 @@ async function browserFetchJson(url) {
             },
             credentials: 'include',
           });
-          if (!resp.ok) return { __error: resp.status, __statusText: resp.statusText };
           const text = await resp.text();
+          if (!resp.ok) return { __error: resp.status, __body: text.substring(0, 500) };
           try {
-            return JSON.parse(text);
+            const parsed = JSON.parse(text);
+            return parsed;
           } catch {
-            return { __error: 'JSON_PARSE_FAIL', __body: text.substring(0, 200) };
+            return { __error: 'JSON_PARSE_FAIL', __body: text.substring(0, 500) };
           }
         } catch (e) {
           return { __error: e.message };
@@ -1545,6 +1543,22 @@ async function browserFetchJson(url) {
     dbg('[browserFetch] evaluate threw:', evalErr.message);
     return { __error: evalErr.message };
   }
+
+  // CRITICAL DIAGNOSIS: Log a sample of the response when the result looks "empty" (0 items)
+  if (json && typeof json === 'object') {
+    const hasItems = (json.comments && json.comments.length > 0) || 
+                     (json.users && json.users.length > 0) || 
+                     (json.reels_media && json.reels_media.length > 0) ||
+                     (json.user && json.user.username);
+    
+    if (!hasItems) {
+      console.error(`[DIAG] Empty response for ${url.substring(0, 60)}...`);
+      console.error(`[DIAG] Response keys: ${Object.keys(json).join(', ')}`);
+      if (json.__body) console.error(`[DIAG] Body sample: ${json.__body}`);
+      if (json.__error) console.error(`[DIAG] Error: ${json.__error}`);
+    }
+  }
+
   return json;
 }
 
