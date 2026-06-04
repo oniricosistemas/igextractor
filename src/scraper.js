@@ -1500,48 +1500,49 @@ async function handleManualLogin() {
   dbg('[Auth] starting manual login flow');
   ui.sectionHeader('⚠️ AUTHENTICATION REQUIRED');
   console.log('\nInstagram ha invalidado tu sesión actual (detección de dispositivo).');
-  console.log('Para solucionar esto, necesitamos que te loguees MANUALMENTE en el navegador interno.');
-  console.log('\nInstrucciones:');
-  console.log('1. Se abrirá una ventana de Chromium.');
-  console.log('2. Ingresa tu usuario y contraseña en Instagram.');
-  console.log('3. Una vez que veas tu perfil o el feed, el programa detectará el login automáticamente.');
-  console.log('4. Si el programa no cierra solo, cierra la ventana del navegador manualmente.\n');
+  console.log('Para arreglar esto, necesitamos que obtengas un NUEVO sessionid de Instagram desde tu navegador real (Chrome/Edge/Firefox).\n');
+  console.log('Pasos:');
+  console.log('1. Abre Instagram en tu navegador y loguéate (www.instagram.com).');
+  console.log('2. Abre las DevTools: presiona F12 o clic derecho -> Inspeccionar.');
+  console.log('3. Ve a la pestaña "Application" (o "Almacenamiento" en español).');
+  console.log('4. En el menú izquierdo, expande "Cookies" -> "https://www.instagram.com".');
+  console.log('5. Busca la cookie llamada "sessionid" y copia su valor (es un string largo).');
+  console.log('\nPegá el sessionid aquí abajo y presioná Enter:\n');
 
+  const readline = require('readline');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const newSessionId = await new Promise(resolve => {
+    rl.question('Session ID: ', answer => { rl.close(); resolve(answer.trim()); });
+  });
+
+  if (!newSessionId) {
+    ui.err('No se proporcionó un sessionid. Abortando.');
+    return;
+  }
+
+  // Validate the new sessionid by trying a simple API call via axios
   try {
-    // Launch a visible browser specifically for login
-    await launchBrowser(false); 
-    const page = await _browser.newPage();
-    await page.goto('https://www.instagram.com/accounts/login/');
-
-    // Wait for sessionid to appear in cookies (polling)
-    let sessionFound = false;
-    for (let i = 0; i < 60; i++) { // Wait up to 60 seconds
-      const cookies = await page.cookies();
-      const sidCookie = cookies.find(c => c.name === 'sessionid');
-      if (sidCookie && sidCookie.value) {
-        _sessionId = sidCookie.value;
-        saveSessionId(_sessionId);
-        sessionFound = true;
-        dbg('[Auth] sessionid captured and saved:', _sessionId.substring(0, 10) + '...');
-        break;
-      }
-      await sleep(2000);
-    }
-
-    if (!sessionFound) {
-      ui.err('No se pudo capturar la sesión. Asegúrate de haber iniciado sesión correctamente.');
+    const testResp = await axios.get('https://www.instagram.com/api/v1/users/web_profile_info/?username=instagram', {
+      headers: {
+        'Cookie': `sessionid=${newSessionId}`,
+        'X-IG-App-ID': '936619743392459',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+      },
+      timeout: 10000,
+      validateStatus: () => true,
+    });
+    if (testResp.status === 200 && testResp.data && testResp.data.data && testResp.data.data.user) {
+      ui.success('¡Session ID válido! Guardando...');
+      _sessionId = newSessionId;
+      saveSessionId(_sessionId);
+    } else if (testResp.data && testResp.data.require_login) {
+      ui.err('El sessionid fue rechazado por Instagram (require_login: true). Probá con uno más reciente.');
     } else {
-      ui.success('¡Sesión capturada con éxito!');
+      ui.err('No se pudo validar el sessionid. ¿Estás seguro de que lo copiaste bien?');
     }
   } catch (e) {
-    dbg('[Auth] manual login error:', e.message);
-    ui.err('Error durante el proceso de login manual: ' + e.message);
-  } finally {
-    if (_browser) {
-      await _browser.close();
-      _browser = null;
-      _page = null;
-    }
+    dbg('[Auth] validation error:', e.message);
+    ui.err('Error validando sessionid: ' + e.message);
   }
 }
 
