@@ -1496,7 +1496,7 @@ async function runCaptionDownload(outputDir, allPosts, imageMap) {
   return results.length;
 }
 
-async async function handleManualLogin() {
+async function handleManualLogin() {
   dbg('[Auth] starting manual login flow');
   ui.sectionHeader('⚠️ AUTHENTICATION REQUIRED');
   console.log('\nInstagram ha invalidado tu sesión actual (detección de dispositivo).');
