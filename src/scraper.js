@@ -4,7 +4,7 @@ const path  = require('path');
 const fs    = require('fs');
 const axios = require('axios');
 const ui    = require('./ui');
-const { isPro }      = require('./license');
+const { isPro, readSessionId, saveSessionId } = require('./license');
 const { t }          = require('./i18n');
 const { dbg }        = require('./debug');
 
@@ -73,12 +73,12 @@ function _walkForChrome(dir, depth) {
   return undefined;
 }
 
-async function launchBrowser() {
+async function launchBrowser(headless = 'new') {
   if (_browser) return;
   const puppeteer = require('puppeteer');
 
   const launchOpts = {
-    headless: 'new',
+    headless: headless,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -1496,16 +1496,114 @@ async function runCaptionDownload(outputDir, allPosts, imageMap) {
   return results.length;
 }
 
+async function handleManualLogin() {
+  dbg('[Auth] starting manual login flow');
+  ui.sectionHeader('⚠️ AUTHENTICATION REQUIRED');
+  console.log('\nInstagram ha invalidado tu sesión actual (detección de dispositivo).');
+  console.log('Para solucionar esto, necesitamos que te loguees MANUALMENTE en el navegador interno.');
+  console.log('\nInstrucciones:');
+  console.log('1. Se abrirá una ventana de Chromium.');
+  console.log('2. Ingresa tu usuario y contraseña en Instagram.');
+  console.log('3. Una vez que veas tu perfil o el feed, el programa detectará el login automáticamente.');
+  console.log('4. Si el programa no cierra solo, cierra la ventana del navegador manualmente.\n');
+
+  try {
+    // Launch a visible browser specifically for login
+    await launchBrowser(false); 
+    const page = await _browser.newPage();
+    await page.goto('https://www.instagram.com/accounts/login/');
+
+    // Wait for sessionid to appear in cookies (polling)
+    let sessionFound = false;
+    for (let i = 0; i < 60; i++) { // Wait up to 60 seconds
+      const cookies = await page.cookies();
+      const sidCookie = cookies.find(c => c.name === 'sessionid');
+      if (sidCookie && sidCookie.value) {
+        _sessionId = sidCookie.value;
+        saveSessionId(_sessionId);
+        sessionFound = true;
+        dbg('[Auth] sessionid captured and saved:', _sessionId.substring(0, 10) + '...');
+        break;
+      }
+      await sleep(2000);
+    }
+
+    if (!sessionFound) {
+      ui.err('No se pudo capturar la sesión. Asegúrate de haber iniciado sesión correctamente.');
+    } else {
+      ui.success('¡Sesión capturada con éxito!');
+    }
+  } catch (e) {
+    dbg('[Auth] manual login error:', e.message);
+    ui.err('Error durante el proceso de login manual: ' + e.message);
+  } finally {
+    if (_browser) {
+      await _browser.close();
+      _browser = null;
+      _page = null;
+    }
+  }
+}
+
 async function browserFetchJson(url) {
   const page = await getPage();
 
-  // Quick inject sessionid if not present
+  // Quick inject sessionid cookie
   if (_sessionId) {
     await page.setCookie({
       name: 'sessionid', value: _sessionId,
       domain: '.instagram.com', path: '/', httpOnly: true, secure: true,
     }).catch(() => {});
   }
+
+  if (!page.url().includes('instagram.com')) {
+    await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+  }
+
+  let json;
+  try {
+    await page.evaluate(`window.__igx_fetch_url = ${JSON.stringify(url)};`);
+    json = await page.evaluate(`
+      (async () => {
+        try {
+          const resp = await fetch(window.__igx_fetch_url, {
+            headers: {
+              'Accept': 'application/json, text/plain, */*',
+              'X-IG-App-ID': '936619743392459',
+              'X-Requested-With': 'XMLHttpRequest',
+            },
+            credentials: 'include',
+          });
+          const text = await resp.text();
+          if (!resp.ok) return { __error: resp.status, __body: text.substring(0, 500) };
+          try {
+            return JSON.parse(text);
+          } catch {
+            return { __error: 'JSON_PARSE_FAIL', __body: text.substring(0, 500) };
+          }
+        } catch (e) {
+          return { __error: e.message };
+        }
+      })()
+    `);
+  } catch (evalErr) {
+    dbg('[browserFetch] evaluate threw:', evalErr.message);
+    return { __error: evalErr.message };
+  }
+
+  // AUTH CHECK: If we get a 401 or require_login: true, trigger manual login flow
+  if (json && (json.__error === 401 || json.require_login === true || json.__error === 'JSON_PARSE_FAIL')) {
+    const isLoginPage = json.__body && json.__body.includes('accounts/login');
+    if (json.__error === 401 || json.require_login === true || isLoginPage) {
+        dbg('[Auth] Session invalid detected via API. Triggering manual login.');
+        await handleManualLogin();
+        // Retry the fetch once after login
+        return await browserFetchJson(url); 
+    }
+  }
+
+  return json;
+}
 
   // Ensure we're on instagram.com domain
   if (!page.url().includes('instagram.com')) {
