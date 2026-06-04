@@ -1605,61 +1605,6 @@ async function browserFetchJson(url) {
   return json;
 }
 
-  // Ensure we're on instagram.com domain
-  if (!page.url().includes('instagram.com')) {
-    await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-  }
-
-  let json;
-  try {
-    await page.evaluate(`window.__igx_fetch_url = ${JSON.stringify(url)};`);
-    json = await page.evaluate(`
-      (async () => {
-        try {
-          const resp = await fetch(window.__igx_fetch_url, {
-            headers: {
-              'Accept': 'application/json, text/plain, */*',
-              'X-IG-App-ID': '936619743392459',
-              'X-Requested-With': 'XMLHttpRequest',
-            },
-            credentials: 'include',
-          });
-          const text = await resp.text();
-          if (!resp.ok) return { __error: resp.status, __body: text.substring(0, 500) };
-          try {
-            const parsed = JSON.parse(text);
-            return parsed;
-          } catch {
-            return { __error: 'JSON_PARSE_FAIL', __body: text.substring(0, 500) };
-          }
-        } catch (e) {
-          return { __error: e.message };
-        }
-      })()
-    `);
-  } catch (evalErr) {
-    dbg('[browserFetch] evaluate threw:', evalErr.message);
-    return { __error: evalErr.message };
-  }
-
-  // CRITICAL DIAGNOSIS: Log a sample of the response when the result looks "empty" (0 items)
-  if (json && typeof json === 'object') {
-    const hasItems = (json.comments && json.comments.length > 0) || 
-                     (json.users && json.users.length > 0) || 
-                     (json.reels_media && json.reels_media.length > 0) ||
-                     (json.user && json.user.username);
-    
-    if (!hasItems) {
-      console.error(`[DIAG] Empty response for ${url.substring(0, 60)}...`);
-      console.error(`[DIAG] Response keys: ${Object.keys(json).join(', ')}`);
-      if (json.__body) console.error(`[DIAG] Body sample: ${json.__body}`);
-      if (json.__error) console.error(`[DIAG] Error: ${json.__error}`);
-    }
-  }
-
-  return json;
-}
-
 async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) {
   const commentsMap = {};
   ui.sectionHeader(t('downloadingComments'));
