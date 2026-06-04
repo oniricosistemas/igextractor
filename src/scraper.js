@@ -626,18 +626,19 @@ async function navigateAndCapture(username, options = {}) {
     });
   }
 
-  dbg('[capture] navigating to profile');
+  console.error('[DEBUG] navigateAndCapture: goto', username);
   try {
     await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
+    console.error('[DEBUG] goto1 url:', page.url().substring(0, 80));
     // If redirected away from profile (bot detection), wait longer and retry once
     if (!page.url().includes(`/${username}`)) {
-      dbg('[capture] redirected, retrying after 5s. url:', page.url());
+      console.error('[DEBUG] redirected, retrying after 5s');
       await sleep(5000);
       await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
-      dbg('[capture] retry url:', page.url());
+      console.error('[DEBUG] goto2 url:', page.url().substring(0, 80));
     }
   } catch (gotoErr) {
-    dbg('[capture] goto failed:', gotoErr.message);
+    console.error('[DEBUG] goto failed:', gotoErr.message);
   }
   // Give JS/XHR a moment to fire after DOM is ready
   await sleep(3000);
