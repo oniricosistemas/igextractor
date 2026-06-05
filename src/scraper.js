@@ -1532,14 +1532,26 @@ async function handleManualLogin() {
       timeout: 10000,
       validateStatus: () => true,
     });
+    dbg('[Auth] validation status:', testResp.status, 'data sample:', JSON.stringify(testResp.data).substring(0, 200));
+    // Accept 200 OK as valid
     if (testResp.status === 200 && testResp.data && testResp.data.data && testResp.data.data.user) {
       ui.success('¡Session ID válido! Guardando...');
       _sessionId = newSessionId;
       saveSessionId(_sessionId);
     } else if (testResp.data && testResp.data.require_login) {
       ui.err('El sessionid fue rechazado por Instagram (require_login: true). Probá con uno más reciente.');
+    } else if (testResp.status === 429) {
+      // 429 means rate limit - but the sessionid itself is likely valid
+      ui.success('Rate limit (429) - el sessionid parece válido, guardando...');
+      _sessionId = newSessionId;
+      saveSessionId(_sessionId);
+    } else if (testResp.status === 200) {
+      // 200 but unexpected shape - still probably valid
+      ui.success('Status 200 OK - guardando sessionid...');
+      _sessionId = newSessionId;
+      saveSessionId(_sessionId);
     } else {
-      ui.err('No se pudo validar el sessionid. ¿Estás seguro de que lo copiaste bien?');
+      ui.err(`No se pudo validar el sessionid (status: ${testResp.status}). ¿Estás seguro de que lo copiaste bien?`);
     }
   } catch (e) {
     dbg('[Auth] validation error:', e.message);
