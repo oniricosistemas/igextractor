@@ -1521,41 +1521,63 @@ async function handleManualLogin() {
     return;
   }
 
-  // Validate the new sessionid by trying a simple API call via axios
+  // Validate the new sessionid by trying a simple API call via Node's native https
+  const https = require('https');
   try {
-    const testResp = await axios.get('https://www.instagram.com/api/v1/users/web_profile_info/?username=instagram', {
-      headers: {
-        'Cookie': `sessionid=${newSessionId}`,
-        'X-IG-App-ID': '936619743392459',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-      },
-      timeout: 10000,
-      validateStatus: () => true,
+    const result = await new Promise((resolve, reject) => {
+      const req = https.get({
+        hostname: 'www.instagram.com',
+        path: '/api/v1/users/web_profile_info/?username=instagram',
+        headers: {
+          'Cookie': `sessionid=${newSessionId}`,
+          'X-IG-App-ID': '936619743392459',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+          'Accept': 'application/json',
+        },
+        timeout: 10000,
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            resolve({ status: res.statusCode, data: parsed });
+          } catch {
+            resolve({ status: res.statusCode, data: data.substring(0, 500) });
+          }
+        });
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
     });
-    dbg('[Auth] validation status:', testResp.status, 'data sample:', JSON.stringify(testResp.data).substring(0, 200));
-    // Accept 200 OK as valid
-    if (testResp.status === 200 && testResp.data && testResp.data.data && testResp.data.data.user) {
-      ui.success('¡Session ID válido! Guardando...');
+    
+    dbg('[Auth] validation status:', result.status, '| data sample:', JSON.stringify(result.data).substring(0, 200));
+    
+    if (result.status === 200 && result.data && result.data.data && result.data.data.user) {
+      ui.success('¡Session ID válido (200 OK con datos)! Guardando...');
       _sessionId = newSessionId;
       saveSessionId(_sessionId);
-    } else if (testResp.data && testResp.data.require_login) {
-      ui.err('El sessionid fue rechazado por Instagram (require_login: true). Probá con uno más reciente.');
-    } else if (testResp.status === 429) {
-      // 429 means rate limit - but the sessionid itself is likely valid
+    } else if (result.status === 429) {
       ui.success('Rate limit (429) - el sessionid parece válido, guardando...');
       _sessionId = newSessionId;
       saveSessionId(_sessionId);
-    } else if (testResp.status === 200) {
-      // 200 but unexpected shape - still probably valid
+    } else if (result.status === 200) {
       ui.success('Status 200 OK - guardando sessionid...');
       _sessionId = newSessionId;
       saveSessionId(_sessionId);
+    } else if (result.data && result.data.require_login) {
+      ui.err('El sessionid fue rechazado por Instagram (require_login: true). Probá con uno más reciente.');
     } else {
-      ui.err(`No se pudo validar el sessionid (status: ${testResp.status}). ¿Estás seguro de que lo copiaste bien?`);
+      ui.err(`No se pudo validar (status: ${result.status}). Igual lo guardamos, probá de nuevo.`);
+      _sessionId = newSessionId;
+      saveSessionId(_sessionId);
     }
   } catch (e) {
     dbg('[Auth] validation error:', e.message);
-    ui.err('Error validando sessionid: ' + e.message);
+    // Even on error, save it - better to try with the new sessionid than keep the old one
+    ui.warn('Error validando: ' + e.message + ' - guardando igual...');
+    _sessionId = newSessionId;
+    saveSessionId(_sessionId);
   }
 }
 
