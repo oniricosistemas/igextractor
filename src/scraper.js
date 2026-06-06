@@ -1525,16 +1525,17 @@ async function handleManualLogin() {
   const https = require('https');
   try {
     const result = await new Promise((resolve, reject) => {
-      const req = https.get({
+      const req = https.request({
         hostname: 'www.instagram.com',
+        port: 443,
         path: '/api/v1/users/web_profile_info/?username=instagram',
+        method: 'GET',
         headers: {
           'Cookie': `sessionid=${newSessionId}`,
           'X-IG-App-ID': '936619743392459',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0',
           'Accept': 'application/json',
         },
-        timeout: 10000,
       }, (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
@@ -1547,8 +1548,9 @@ async function handleManualLogin() {
           }
         });
       });
+      req.setTimeout(10000, () => { req.destroy(); reject(new Error('timeout')); });
       req.on('error', reject);
-      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+      req.end();
     });
     
     dbg('[Auth] validation status:', result.status, '| data sample:', JSON.stringify(result.data).substring(0, 200));
@@ -1667,13 +1669,22 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
     spinner.start();
 
     try {
+      let attempt = 0;
       while (hasMore && postComments.length < 500) {
         const params = new URLSearchParams({ can_support_threading: 'true', permalink_enabled: 'false' });
         if (nextMinId) params.set('min_id', nextMinId);
         const endpoint = `${IG_BASE}/api/v1/media/${mediaId}/comments/?${params}`;
         dbg('[comments] browser fetch', endpoint);
         const json = await browserFetchJson(endpoint);
-      if (!json || json.__error) { dbg('[comments] API error:', json && json.__error); break; }
+        if (!json || json.__error) {
+          dbg('[comments] API error:', json && json.__error);
+          if (json && (json.__error === 401 || json.require_login === true) && attempt === 0) {
+            attempt++;
+            await sleep(3000);
+            continue;
+          }
+          break;
+        }
         const items = json.comments || [];
         for (const c of items) {
           postComments.push({
