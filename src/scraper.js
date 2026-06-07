@@ -1719,6 +1719,7 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
 
 async function runStoriesDownload(outputDir, profileData) {
   const userId = profileData.pk || profileData.id;
+  console.error('[DIAG][stories] userId:', userId, '| profileData keys:', Object.keys(profileData).join(', '));
   if (!userId) {
     ui.err('User ID not found, cannot download stories');
     return 0;
@@ -1748,6 +1749,9 @@ async function runStoriesDownload(outputDir, profileData) {
         continue;
       }
       dbg('[stories] API response top-level keys:', Object.keys(json).join(', '));
+      console.error('[DIAG] stories endpoint:', endpoint.substring(0, 80), '| status:', json.status || 'ok', '| keys:', Object.keys(json).join(','));
+      if (json.reels_media) console.error('[DIAG] reels_media length:', json.reels_media.length);
+      if (json.reels) console.error('[DIAG] reels keys:', Object.keys(json.reels).join(','));
       const reelsMedia = json.reels_media ||
         (json.reel && [json.reel]) ||
         (json.reels && Object.values(json.reels)) ||
