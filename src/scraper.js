@@ -581,10 +581,11 @@ async function navigateAndCapture(username, options = {}) {
 
       const foundUser = deepFindUser(json, username);
       if (foundUser) {
-        const hasCounters = foundUser.follower_count != null || foundUser.edge_followed_by != null;
-        const currentHasCounters = result.user && (result.user.follower_count != null || result.user.edge_followed_by != null);
-        if (!result.user || (hasCounters && !currentHasCounters)) {
-          dbg('[capture] FOUND USER via deep scan (counters:', hasCounters, '):', foundUser.username);
+        const foundCount = (foundUser.follower_count || (foundUser.edge_followed_by && foundUser.edge_followed_by.count) || 0);
+        const currentCount = result.user ? (result.user.follower_count || (result.user.edge_followed_by && result.user.edge_followed_by.count) || 0) : 0;
+        // Update if we found a better user (more followers than current, or current has none)
+        if (!result.user || foundCount > currentCount) {
+          console.error('[DIAG] capture updating result.user:', foundUser.username, '| followers:', foundCount, '| posts:', foundUser.media_count || (foundUser.edge_owner_to_timeline_media && foundUser.edge_owner_to_timeline_media.count) || 0);
           result.user = foundUser;
         }
       }
