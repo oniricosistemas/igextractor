@@ -917,8 +917,8 @@ async function scrollForMorePosts(existingPosts, limit) {
   return posts;
 }
 
-function normalizeProfile(u) {
-  return {
+async function normalizeProfile(u) {
+  const n = {
     id:          u.id  || u.pk  || null,
     pk:          u.pk  || u.id  || null,
     username:    u.username  || '',
@@ -936,6 +936,8 @@ function normalizeProfile(u) {
     edge_follow:                  { count: u.following_count || (u.edge_follow && u.edge_follow.count)             || 0 },
     edge_owner_to_timeline_media: { count: u.media_count     || (u.edge_owner_to_timeline_media && u.edge_owner_to_timeline_media.count) || 0 },
   };
+  console.error('[DIAG] normalizeProfile for', u.username, '| pk:', n.pk, '| followers:', n.edge_followed_by.count, '| following:', n.edge_follow.count, '| posts:', n.edge_owner_to_timeline_media.count);
+  return n;
 }
 
 async function downloadFile(url, dest) {
