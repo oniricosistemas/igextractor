@@ -791,25 +791,45 @@ async function navigateAndCapture(username, options = {}) {
     }
   }
 
-  // Fallback: build user from og: meta tags if no user found yet, or fill missing counters
+  // Fallback: build user from og: meta tags or inline script data
   try {
-    // Wait up to 5s for og:description to appear (needs JS to execute)
-    await page.waitForSelector('meta[property="og:description"]', { timeout: 5000 }).catch(() => {});
-    const ogData = await page.evaluate((targetUsername) => {
+    let ogDesc   = null;
+    let ogTitle  = null;
+    let ogImage  = null;
+
+    // Try meta tags first (wait up to 10s for JS-rendered page)
+    try {
+      await page.waitForSelector('meta[property="og:description"]', { timeout: 10000 });
+    } catch {}
+    const ogData = await page.evaluate(() => {
       const desc  = document.querySelector('meta[property="og:description"]');
       const title = document.querySelector('meta[property="og:title"]');
       const image = document.querySelector('meta[property="og:image"]');
       return {
-        desc:     desc  ? desc.getAttribute('content')  : null,
-        title:    title ? title.getAttribute('content') : null,
-        image:    image ? image.getAttribute('content') : null,
-        pageUrl:  location.href,
-        username: targetUsername,
+        desc: desc ? desc.getAttribute('content') : null,
+        title: title ? title.getAttribute('content') : null,
+        image: image ? image.getAttribute('content') : null,
+        htmlTitle: document.title,
+        pageUrl: location.href,
       };
-    }, username);
+    });
 
-    dbg('[capture] ogData url:', ogData.pageUrl, 'desc:', ogData.desc ? ogData.desc.substring(0, 80) : null);
-    if (ogData.desc || ogData.title) {
+    ogDesc  = ogData.desc;
+    ogTitle = ogData.title;
+    ogImage = ogData.image;
+
+    // If no og:description, try extracting from JSON-LD script or og:title
+    if (!ogDesc && ogData.htmlTitle) {
+      const titleMatch = ogData.htmlTitle.match(/^(.*?)\s*\(@/);
+      if (titleMatch) {
+        // The og:title format is "Full Name (@username) • Instagram photos and videos"
+        // Fallback: extract full_name only
+        ogTitle = ogData.htmlTitle;
+      }
+    }
+
+    dbg('[capture] ogData url:', ogData.pageUrl, 'desc:', ogDesc ? ogDesc.substring(0, 80) : null);
+    if (ogDesc || ogTitle) {
       const parseNum = s => {
         s = s.trim();
         const m = s.match(/^([\d.,]+)\s*([KMBkmb]?)$/);
@@ -828,7 +848,7 @@ async function navigateAndCapture(username, options = {}) {
         return Math.round(n * mult);
       };
 
-      const content = ogData.desc || '';
+      const content = ogDesc || '';
       const followers = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Followers?|seguidores)/i);
       const following = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Following|seguidos)/i);
       const posts     = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Posts?|publicaciones)/i);
@@ -839,10 +859,10 @@ async function navigateAndCapture(username, options = {}) {
         media_count:     posts     ? parseNum(posts[1])     : 0,
       };
 
-      // Extract full_name from og:title — format: "Full Name (@username) • ..."
+      // Extract full_name from og:title or document.title
       let full_name = '';
-      if (ogData.title) {
-        const nameMatch = ogData.title.match(/^(.+?)\s*\(@/);
+      if (ogTitle) {
+        const nameMatch = ogTitle.match(/^(.+?)\s*\(@/);
         if (nameMatch) full_name = nameMatch[1].trim();
       }
 
@@ -855,20 +875,47 @@ async function navigateAndCapture(username, options = {}) {
           id:          null,
           is_private:  false,
           is_verified: false,
-          profile_pic_url: ogData.image || '',
+          profile_pic_url: ogImage || '',
         };
       }
 
+      // ALWAYS fill counters if metaCounts has them — this overwrites partial zeros from early interceptors
       if (metaCounts.follower_count || metaCounts.following_count || metaCounts.media_count) {
-        dbg('[capture] og fallback counts:', metaCounts);
-        result.user.follower_count  = result.user.follower_count  || metaCounts.follower_count;
-        result.user.following_count = result.user.following_count || metaCounts.following_count;
-        result.user.media_count     = result.user.media_count     || metaCounts.media_count;
+        dbg('[capture] og fallback counts:', metaCounts, '| current follower_count:', result.user.follower_count);
+        if (metaCounts.follower_count)  result.user.follower_count  = metaCounts.follower_count;
+        if (metaCounts.following_count) result.user.following_count = metaCounts.following_count;
+        if (metaCounts.media_count)     result.user.media_count     = metaCounts.media_count;
         if (!result.user.full_name && full_name) result.user.full_name = full_name;
+        dbg('[capture] after og fill: follower_count:', result.user.follower_count);
       }
     }
   } catch (e) {
     dbg('[capture] og fallback failed:', e && e.message);
+  }
+
+  // Last resort: try to extract user_id from page scripts (Instagram embeds it)
+  if (!result.user || !result.user.pk) {
+    try {
+      const scriptData = await page.evaluate(() => {
+        const scripts = document.querySelectorAll('script[type="text/javascript"]');
+        for (const s of scripts) {
+          const text = s.textContent || '';
+          if (text.includes('window.__INITIAL_STATE__')) {
+            const match = text.match(/window\.__INITIAL_STATE__\s*=\s*({.*?});/);
+            if (match) return match[1].substring(0, 5000);
+          }
+        }
+        return null;
+      });
+      if (scriptData) {
+        const uidMatch = scriptData.match(/"user_id"\s*:\s*"(\d+)"/);
+        if (uidMatch && uidMatch[1]) {
+          if (result.user) { result.user.pk = uidMatch[1]; result.user.id = uidMatch[1]; }
+        }
+      }
+    } catch (e) {
+      dbg('[capture] script pk extraction failed:', e.message);
+    }
   }
 
   dbg('[capture] result.user:', result.user ? result.user.username : null);

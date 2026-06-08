@@ -80,7 +80,7 @@ function isPro()    { return _cachedPlan === 'pro'; }
 function getPlan()  { return _cachedPlan || 'free'; }
 function setPlan(p) { _cachedPlan = p; }
 
-module.exports = { readApiKey, saveApiKey, removeApiKey, validateKey, checkLicense, isPro, getPlan, setPlan, ENV_FILE };
+module.exports = { readApiKey, saveApiKey, removeApiKey, validateKey, checkLicense, isPro, getPlan, setPlan, ENV_FILE, readSessionId, saveSessionId };
 
 // ─── Session ID (saved for all plans) ────────────────────────────────────────
 function readSessionId() {
