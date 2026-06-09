@@ -2,6 +2,7 @@
 
 const path  = require('path');
 const fs    = require('fs');
+const { pipeline } = require('stream');
 const axios = require('axios');
 const ui    = require('./ui');
 const { isPro, readSessionId, saveSessionId } = require('./license');
@@ -72,9 +73,10 @@ const IG_BASE     = 'https://www.instagram.com';
 const sleep       = ms => new Promise(r => setTimeout(r, ms));
 
 // ─── Browser singleton ────────────────────────────────────────────────────────
-let _browser   = null;
-let _page      = null;
-let _sessionId = '';
+let _browser        = null;
+let _browserPromise = null;
+let _page           = null;
+let _sessionId      = '';
 
 /**
  * Locate Chromium when running as a pkg-compiled binary.
@@ -131,7 +133,7 @@ function _walkForChrome(dir, depth) {
 }
 
 async function launchBrowser(headless = true) {
-  if (_browser) return;
+  if (_browserPromise) return _browserPromise;
   const puppeteer = require('puppeteer');
 
   const launchOpts = {
@@ -148,14 +150,25 @@ async function launchBrowser(headless = true) {
   const bundled = _findBundledChromium();
   if (bundled) {
     launchOpts.executablePath = bundled;
-    console.error('[DEBUG] Using bundled Chromium:', bundled);
+    dbg('[DEBUG] Using bundled Chromium:', bundled);
   } else {
-    console.error('[DEBUG] No bundled Chromium found, using puppeteer default. process.pkg=', !!process.pkg, 'execPath=', process.execPath);
+    dbg('[DEBUG] No bundled Chromium found, using puppeteer default. process.pkg=', !!process.pkg, 'execPath=', process.execPath);
   }
-  _browser = await puppeteer.launch(launchOpts);
+  _browserPromise = (async () => {
+    try {
+      _browser = await puppeteer.launch(launchOpts);
+      return _browser;
+    } catch (e) {
+      _browserPromise = null;
+      throw e;
+    }
+  })();
+  return _browserPromise;
 }
 
 async function getPage() {
+  // Path A: cached _page exists → just set session cookie and return
+  // Path B: first call → launch browser, create page, navigate with session
   if (_page) {
     if (_sessionId) {
       await _page.setCookie({
@@ -209,7 +222,13 @@ async function getPage() {
   try {
     await _page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 });
     await sleep(1500);
-  } catch {}
+    const url1 = _page.url();
+    if (!url1 || !url1.includes('instagram.com')) {
+      throw new Error(t('navFailFirstGoto'));
+    }
+  } catch (e) {
+    if (e.message && e.message.includes('Navigation failed')) throw e;
+  }
 
   if (_sessionId) {
     // Step 2: inject sessionid AFTER baseline navigation so Instagram sees it as a cookie update, not a foreign cookie
@@ -224,7 +243,13 @@ async function getPage() {
     try {
       await _page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 });
       await sleep(1500);
-    } catch {}
+      const url2 = _page.url();
+      if (!url2 || !url2.includes('instagram.com')) {
+        throw new Error(t('navFailSessionGoto'));
+      }
+    } catch (e) {
+      if (e.message && e.message.includes('Navigation failed')) throw e;
+    }
   }
 
   return _page;
@@ -232,14 +257,15 @@ async function getPage() {
 
 async function closeBrowser() {
   try {
-    if (_browser) { await _browser.close(); _browser = null; _page = null; }
+    if (_browser) { await _browser.close(); _browser = null; _page = null; _browserPromise = null; }
   } catch {}
 }
 
 // Clean up Chrome on process exit to prevent zombie processes
+// process.on('exit') is synchronous — can't await, use process.kill()
 process.on('exit', () => {
-  if (_browser) {
-    try { _browser.close(); } catch (e) {}
+  if (_browser && _browser.process) {
+    try { _browser.process().kill('SIGTERM'); } catch (e) {}
     _browser = null; _page = null;
   }
 });
@@ -279,8 +305,8 @@ function getPostTimestamp(node) {
 
 function isReel(node) {
   if (!node) return false;
-  if (node.__typename === 'GraphVideo') return true;
-  if (node.media_type === 2) return true;
+  if (node.__typename === 'GraphVideo' && node.product_type === 'clips') return true;
+  if (node.media_type === 2 && node.product_type === 'clips') return true;
   if (node.video_versions && node.video_versions.length) return true;
   if (node.is_video) return true;
   return false;
@@ -290,10 +316,9 @@ function getVideoUrl(node) {
   if (!node) return null;
   if (node.video_versions && node.video_versions.length) return node.video_versions[0].url;
   if (node.video_url) return node.video_url;
-  if (node.edge_media_to_children && node.edge_media_to_children.edges && node.edge_media_to_children.edges.length) {
-    const first = node.edge_media_to_children.edges[0].node;
-    if (first && first.video_url) return first.video_url;
-  }
+  const children = node.edge_media_to_children?.edges;
+  const first = children?.[0];
+  if (first?.node?.video_url) return first.node.video_url;
   return null;
 }
 
@@ -304,10 +329,9 @@ function __getImageUrl(node) {
   }
   if (node.display_url)    return node.display_url;
   if (node.thumbnail_src)  return node.thumbnail_src;
-  if (node.edge_media_to_children && node.edge_media_to_children.edges && node.edge_media_to_children.edges.length) {
-    const first = node.edge_media_to_children.edges[0].node;
-    if (first && first.display_url) return first.display_url;
-  }
+  const children = node.edge_media_to_children?.edges;
+  const first = children?.[0];
+  if (first?.node?.display_url) return first.node.display_url;
   return null;
 }
 
@@ -322,13 +346,13 @@ function getCarouselItems(node) {
 
 async function fetchProfileFromApi(username) {
   if (!_sessionId) return null;
-  const apiUrl = `${IG_BASE}/api/v1/users/web_profile_info/?username=${username}`;
+  const apiUrl = `${IG_BASE}/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
 
   // Collect baseline cookies from the browser (csrftoken, mid, ig_did, datr, etc.)
   // These are required alongside sessionid to avoid 429s on direct API calls
   let cookieHeader = `sessionid=${_sessionId}`;
   try {
-    const page = await getPage();
+    const page = await getPage(); // Primary path: Browser required for this operation
     const cookies = await page.cookies('https://www.instagram.com');
     const cookieMap = {};
     for (const c of cookies) cookieMap[c.name] = c.value;
@@ -354,7 +378,7 @@ async function fetchProfileFromApi(username) {
       },
       timeout: 15000,
     });
-    console.error('[DEBUG] profileApi axios status:', resp.status, 'keys:', Object.keys(resp.data || {}).join(', '));
+    dbg('[DEBUG] profileApi axios status:', resp.status, 'keys:', Object.keys(resp.data || {}).join(', '));
     const json = resp.data;
     if (typeof json === 'object' && json) {
       dbg('[profileApi] axios response keys:', Object.keys(json).join(', '));
@@ -365,7 +389,7 @@ async function fetchProfileFromApi(username) {
       }
     }
   } catch (e) {
-    console.error('[DEBUG] profileApi axios failed:', e.message, 'status:', e.response && e.response.status);
+    dbg('[DEBUG] profileApi axios failed:', e.message, 'status:', e.response && e.response.status);
   }
 
   try {
@@ -414,10 +438,10 @@ async function fetchProfileFromApi(username) {
         dbg('[profileApi] FOUND user via browser fetch:', user.username);
         return user;
       } else {
-        console.error('[DEBUG] profileApi browser fetch: got json but no user. keys:', Object.keys(json).join(', '), '| json.data:', JSON.stringify(json.data)?.substring(0, 200));
+        dbg('[DEBUG] profileApi browser fetch: got json but no user. keys:', Object.keys(json).join(', '), '| json.data:', JSON.stringify(json.data)?.substring(0, 200));
       }
     } else {
-      console.error('[DEBUG] profileApi browser fetch error:', json && json.error);
+      dbg('[DEBUG] profileApi browser fetch error:', json && json.error);
     }
   } catch (e) {
     dbg('[profileApi] browser fetch failed:', e.message);
@@ -429,7 +453,7 @@ async function fetchProfileFromApi(username) {
 async function buildPostsFromShortcodes(shortcodes = [], limit = 50, options = {}) {
   const results = [];
   if (!shortcodes || !shortcodes.length) return results;
-  const page = await getPage();
+  const page = await getPage(); // Primary path: Browser required for this operation
   const max = Math.min(shortcodes.length, limit || shortcodes.length);
   for (let i = 0; i < max; i++) {
     const code = shortcodes[i];
@@ -475,10 +499,14 @@ async function buildPostsFromShortcodes(shortcodes = [], limit = 50, options = {
       }
 
       if (!json) {
+        const prevUrl = page.url();
         const fetchUrl = `${IG_BASE}/p/${code}/`;
         const response = await page.goto(fetchUrl, { waitUntil: 'networkidle2', timeout: 20000 });
         lastHtml = await response.text();
-        throw new Error('no JSON payload from all fetch attempts');
+        if (prevUrl && prevUrl.includes('instagram.com')) {
+          await page.goto(prevUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+        }
+        throw new Error(t('noJsonPayload'));
       }
 
       if (options.debug) {
@@ -522,7 +550,7 @@ async function fetchPostsFromGraphql(userId, limit = 50, options = {}, exampleUr
   if (!variables) variables = { id: String(userId), first: 12 };
 
   const axiosInstance = axios.create({ timeout: 15000, headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-  if (process.env.IG_SESSION_ID) axiosInstance.defaults.headers.Cookie = `sessionid=${process.env.IG_SESSION_ID}`;
+  if (_sessionId || process.env.IGX_SESSION || process.env.IG_SESSION_ID) axiosInstance.defaults.headers.Cookie = `sessionid=${_sessionId || process.env.IGX_SESSION || process.env.IG_SESSION_ID}`;
 
   let hasNext = true;
   let end_cursor = variables.after || null;
@@ -569,7 +597,7 @@ async function fetchPostsFromGraphql(userId, limit = 50, options = {}, exampleUr
 }
 
 async function navigateAndCapture(username, options = {}) {
-  const page   = await getPage();
+  const page   = await getPage(); // Primary path: Browser required for this operation
   const result = { user: null, posts: [], gridShortcodes: [], domShortcodes: [], graphqlQueries: [] };
 
   const apiUser = await fetchProfileFromApi(username);
@@ -629,7 +657,7 @@ async function navigateAndCapture(username, options = {}) {
         const currentCount = result.user ? (result.user.follower_count || (result.user.edge_followed_by && result.user.edge_followed_by.count) || 0) : 0;
         // Update if we found a better user (more followers than current, or current has none)
         if (!result.user || foundCount > currentCount) {
-          console.error('[DIAG] capture updating result.user:', foundUser.username, '| followers:', foundCount, '| posts:', foundUser.media_count || (foundUser.edge_owner_to_timeline_media && foundUser.edge_owner_to_timeline_media.count) || 0);
+          dbg('[DIAG] capture updating result.user:', foundUser.username, '| followers:', foundCount, '| posts:', foundUser.media_count || (foundUser.edge_owner_to_timeline_media && foundUser.edge_owner_to_timeline_media.count) || 0);
           result.user = foundUser;
         }
       }
@@ -648,6 +676,7 @@ async function navigateAndCapture(username, options = {}) {
         const reqUrl = request.url();
         const method = request.method();
         const headers = request.headers();
+        if (headers['Cookie']) { headers['Cookie'] = headers['Cookie'].replace(/sessionid=[^;]+/, 'sessionid=***'); }
         const postData = request.postData ? request.postData() : null;
         const safeName = `request_${(reqUrl && reqUrl.replace(/[^a-z0-9_\-\.]/gi, '_').slice(0,120))}_${Date.now()}.json`;
         await saveDebugFile('network', safeName, { url: reqUrl, method, headers, postData }).catch(() => {});
@@ -657,17 +686,17 @@ async function navigateAndCapture(username, options = {}) {
   }
 
   try {
-    console.error('[DEBUG] navigateAndCapture: goto', username);
+    dbg('[DEBUG] navigateAndCapture: goto', username);
     await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 }).catch(async (gotoErr) => {
-      console.error('[DEBUG] goto failed:', gotoErr.message);
+      dbg('[DEBUG] goto failed:', gotoErr.message);
     });
-    console.error('[DEBUG] goto1 url:', page.url().substring(0, 80));
+    dbg('[DEBUG] goto1 url:', page.url().substring(0, 80));
     // If redirected away from profile (bot detection), wait longer and retry once
     if (!page.url().includes(`/${username}`)) {
-      console.error('[DEBUG] redirected, retrying after 5s');
+      dbg('[DEBUG] redirected, retrying after 5s');
       await sleep(5000);
       await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
-      console.error('[DEBUG] goto2 url:', page.url().substring(0, 80));
+      dbg('[DEBUG] goto2 url:', page.url().substring(0, 80));
     }
     // Give JS/XHR a moment to fire after DOM is ready
     await sleep(3000);
@@ -712,7 +741,7 @@ async function navigateAndCapture(username, options = {}) {
         } catch (e) {}
         lastScroll = elapsed;
       }
-      if (result.user && result.posts.length >= 10) {
+      if (result.user && result.posts.length >= (options.scanLimit || 10)) {
         dbg('[capture] sufficient posts captured, stopping scroll.');
         break;
       }
@@ -744,7 +773,7 @@ async function navigateAndCapture(username, options = {}) {
           result.domShortcodes = domCodes;
           dbg('[capture] DOM extraction found', domCodes.length, 'shortcodes');
           if (options && options.debug) {
-            saveDebugFile('dom_payloads', `dom_shortcodes_${username}_${Date.now()}.json`, domCodes).catch(() => {});
+            await saveDebugFile('dom_payloads', `dom_shortcodes_${username}_${Date.now()}.json`, domCodes).catch(() => {});
           }
         }
       } catch (e) {
@@ -968,7 +997,7 @@ async function navigateAndCapture(username, options = {}) {
 }
 
 async function scrollForMorePosts(existingPosts, limit) {
-  const page  = await getPage();
+  const page  = await getPage(); // Primary path: Browser required for this operation
   const posts = [...existingPosts];
   const seen  = new Set(posts.map(p => getPostCode(p)).filter(Boolean));
 
@@ -1029,63 +1058,72 @@ async function normalizeProfile(u) {
     edge_follow:                  { count: u.following_count || (u.edge_follow && u.edge_follow.count)             || 0 },
     edge_owner_to_timeline_media: { count: u.media_count     || (u.edge_owner_to_timeline_media && u.edge_owner_to_timeline_media.count) || 0 },
   };
-  console.error('[DIAG] normalizeProfile for', u.username, '| pk:', n.pk, '| followers:', n.edge_followed_by.count, '| following:', n.edge_follow.count, '| posts:', n.edge_owner_to_timeline_media.count);
+  dbg('[DIAG] normalizeProfile for', u.username, '| pk:', n.pk, '| followers:', n.edge_followed_by.count, '| following:', n.edge_follow.count, '| posts:', n.edge_owner_to_timeline_media.count);
   return n;
 }
 
 async function downloadFile(url, dest) {
-  const page = await getPage();
   try {
-    // Pass URL via window to keep page.evaluate signature clean (pkg-friendly)
-    await page.evaluate(`window.__igx_dl_url = ${JSON.stringify(url)};`);
-    const base64Data = await page.evaluate(`
-      (async () => {
-        try {
-          const resp = await fetch(window.__igx_dl_url);
-          if (!resp.ok) throw new Error('HTTP ' + resp.status);
-          const blob = await resp.blob();
-          return await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-              // result is a data URL: "data:<mime>;base64,<data>"
-              const result = reader.result || '';
-              const idx = result.indexOf(',');
-              resolve(idx >= 0 ? result.substring(idx + 1) : result);
-            };
-            reader.onerror = () => reject(new Error('FileReader error'));
-            reader.readAsDataURL(blob);
-          });
-        } catch (e) { return { __error: e.message }; }
-      })()
-    `);
-    if (base64Data && typeof base64Data === 'string') {
-      fs.writeFileSync(dest, Buffer.from(base64Data, 'base64'));
-    } else {
-      throw new Error((base64Data && base64Data.__error) || 'Empty response');
-    }
-  } catch (e) {
-    dbg('[download] Failed to download via Puppeteer-Fetch:', url, e.message);
-    try {
-      const res = await axios.get(url, {
-        responseType: 'arraybuffer',
-        timeout: 60000,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Referer':    'https://www.instagram.com/',
-        },
+    const res = await axios.get(url, {
+      responseType: 'stream',
+      timeout: 60000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer':    'https://www.instagram.com/',
+        'X-IG-App-ID': '936619743392459',
+      },
+    });
+    const writer = fs.createWriteStream(dest);
+    await new Promise((resolve, reject) => {
+      pipeline(res.data, writer, err => {
+        if (err) reject(err);
+        else resolve();
       });
-      fs.writeFileSync(dest, Buffer.from(res.data));
+    });
+    return true;
+  } catch (e) {
+    dbg('[download] Axios stream failed:', url, e.message);
+    try {
+      const page = await getPage();
+      const base64Chunks = await page.evaluate(`
+        (async () => {
+          try {
+            const resp = await fetch(${JSON.stringify(url)});
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const reader = resp.body.getReader();
+            const chunks = [];
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              let binary = '';
+              for (let i = 0; i < value.length; i++) {
+                binary += String.fromCharCode(value[i]);
+              }
+              chunks.push(btoa(binary));
+            }
+            return chunks;
+          } catch (e) { return { __error: e.message }; }
+        })()
+      `);
+      if (base64Chunks && Array.isArray(base64Chunks)) {
+        const fd = fs.openSync(dest, 'w');
+        for (const c of base64Chunks) {
+          fs.writeSync(fd, Buffer.from(c, 'base64'));
+        }
+        fs.closeSync(fd);
+        return true;
+      }
+      throw new Error(t('emptyResponse'));
     } catch (e2) {
-      dbg('[download] Axios fallback also failed:', e2.message);
+      dbg('[download] Puppeteer fallback also failed:', e2.message);
+      return false;
     }
   }
 }
 
 async function fetchProfileOnly(username, options) {
   // Wrap in try/catch to prevent crash on malformed percent-encoding
-  _sessionId = (() => {
-    try { return decodeURIComponent((options && options.sessionId) || ''); } catch (e) { return (options && options.sessionId) || ''; }
-  })();
+  _sessionId = (options && options.sessionId) || '';
   const spinner = ui.createSpinner(t('spinLaunching'));
   spinner.start();
   try {
@@ -1095,15 +1133,15 @@ async function fetchProfileOnly(username, options) {
     return user ? normalizeProfile(user) : null;
   } catch (e) {
     spinner.fail(null);
-    console.error('[ERROR] fetchProfileOnly failed:', e && e.message);
-    return null;
+    dbg('[ERROR] fetchProfileOnly failed:', e && e.message);
+    throw e;
   }
 }
 
 async function extractProfile(username, options = {}) {
   options.username = username;
   const pro = isPro();
-  _sessionId = (() => { try { return decodeURIComponent(options.sessionId || process.env.IG_SESSION_ID || ''); } catch (e) { return options.sessionId || process.env.IG_SESSION_ID || ''; } })();
+  _sessionId = options.sessionId || process.env.IGX_SESSION || process.env.IG_SESSION_ID || '';
   dbg('[extractProfile] _sessionId length:', _sessionId.length, 'options.sessionId length:', (options.sessionId||'').length);
   
   const planMax      = pro ? Infinity : FREE_LIMIT;
@@ -1117,7 +1155,7 @@ async function extractProfile(username, options = {}) {
     : path.join(process.cwd(), `ig_${username}`);
   
   if (options.debug) {
-    try { console.log('[DEBUG][extractProfile] options.debug =', !!options.debug, ' _debugBase will be set to', path.join(outputDir, 'debug')); } catch (e) {}
+    try { dbg('[extractProfile] options.debug =', !!options.debug, ' _debugBase will be set to', path.join(outputDir, 'debug')); } catch (e) {}
     options._debugDir = path.join(outputDir, 'debug');
     _debugBase = options._debugDir;
     try {
@@ -1142,7 +1180,7 @@ async function extractProfile(username, options = {}) {
     options.scanLimit = 500;
   }
   
-  ui.sectionHeader(`Extracting @${username}`);
+  ui.sectionHeader(t('extractingProfile', username));
   ui.info(t('outputDir', outputDir));
   ui.info(t('planLabel', pro ? t('planPro') : t('planFree')));
   ui.newline();
@@ -1150,11 +1188,15 @@ async function extractProfile(username, options = {}) {
   let profileData  = null;
   let initialPosts = [];
   
+  let resultCapture;
   try {
     const spin = ui.createSpinner(t('spinLoadingPosts'));
     spin.start();
-    const resultCapture = await navigateAndCapture(username, options);
-    spin.stop(null);
+    try {
+      resultCapture = await navigateAndCapture(username, options);
+    } finally {
+      spin.stop(null);
+    }
     
     const { user, posts, gridShortcodes, domShortcodes } = resultCapture;
     profileData  = options.profileData || (user ? normalizeProfile(user) : null);
@@ -1295,7 +1337,6 @@ async function saveDebugFile(dir, filename, content) {
     const debugBase = _debugBase || process.env.IG_DEBUG_BASE || path.resolve('debug');
     const targetDir = path.join(debugBase, dir);
 
-    console.log(`[debug-save] Target: debugBase=${debugBase}, targetDir=${targetDir}, filename=${filename}`);
     dbg(`[debug-save] Target: debugBase=${debugBase}, targetDir=${targetDir}, filename=${filename}`);
 
     if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
@@ -1304,15 +1345,12 @@ async function saveDebugFile(dir, filename, content) {
 
     fs.writeFileSync(tmpPath, typeof content === 'string' ? content : JSON.stringify(content, null, 2));
     const stats = fs.statSync(tmpPath);
-    console.log(`[debug-save] Written tmp file: ${tmpPath} (${stats.size} bytes)`);
     dbg(`[debug-save] Written tmp file: ${tmpPath} (${stats.size} bytes)`);
 
     fs.renameSync(tmpPath, finalPath);
-    console.log(`[debug-save] Renamed to final path: ${finalPath}`);
     dbg(`[debug-save] Renamed to final path: ${finalPath}`);
   } catch (e) {
     dbg('[debug-save] failed to save artifact:', e.message);
-    console.error('[debug-save] Critical error saving artifact:', e.message);
 
     try {
       const debugBase = _debugBase || process.env.IG_DEBUG_BASE || path.resolve('debug');
@@ -1334,7 +1372,7 @@ async function saveDebugFile(dir, filename, content) {
       fs.writeFileSync(tmpErrPath, JSON.stringify(errorPayload, null, 2));
       fs.renameSync(tmpErrPath, errorPath);
     } catch (err2) {
-      console.error('[debug-save] failed to write error artifact to debugBase/_errors:', err2.message);
+      dbg('[debug-save] failed to write error artifact to debugBase/_errors:', err2.message);
     }
   }
 }
@@ -1368,9 +1406,13 @@ async function runMediaDownload(outputDir, allPosts, limit, wantPhotos, wantReel
     });
   }
 
-  if (wantPhotos)  ui.sectionHeader(t('downloadingImages'));
-  if (wantReels && !wantPhotos) ui.sectionHeader(t('downloadingReels'));
-  if (wantPhotos && wantReels) ui.sectionHeader(t('downloadingImages') + ' + ' + t('downloadingReels').replace('Descargando ', '').replace('Downloading ', ''));
+  if (wantPhotos && wantReels) {
+    ui.sectionHeader(t('downloadingImagesReels'));
+  } else if (wantPhotos) {
+    ui.sectionHeader(t('downloadingImages'));
+  } else if (wantReels) {
+    ui.sectionHeader(t('downloadingReels'));
+  }
 
   const photoLimit = wantPhotos ? (limit === Infinity ? Infinity : limit) : 0;
   const reelLimit  = wantReels  ? (limit === Infinity ? Infinity : limit) : 0;
@@ -1406,7 +1448,6 @@ async function runMediaDownload(outputDir, allPosts, limit, wantPhotos, wantReel
       dbg('[media] downloadLimit applied as TOTAL limit:', totalLimit, 'posts will be considered');
     } catch (e) { dbg('[media] applying total downloadLimit failed:', e && e.message); }
   }
-  const allowedShortcodes = new Set(gridShortcodes);
   let currentStrictGrid = options.strictGrid || false;
   let inspectedCount = 0;
   const scanLimit = options.scanLimit || 500;
@@ -1414,8 +1455,8 @@ async function runMediaDownload(outputDir, allPosts, limit, wantPhotos, wantReel
   const totalTarget = (wantPhotos ? photoLimit : 0) + (wantReels ? reelLimit : 0);
   // Track inspected items for progress (stops bar from stalling on skipped posts)
   const barLimit = Math.min(filtered.length, scanLimit === Infinity ? filtered.length : scanLimit);
-  const bar = ui.createProgressBar(wantReels && !wantPhotos ? t('storyLabel') : t('imageLabel'), 'brand');
-  
+  const bar = ui.createProgressBar(wantReels && !wantPhotos ? t('reelLabel') : t('imageLabel'), 'brand');
+
   const mediaMap = [];
 
   const processPosts = async () => {
@@ -1435,11 +1476,6 @@ async function runMediaDownload(outputDir, allPosts, limit, wantPhotos, wantReel
       const postIsReel = isReel(post);
       const code = getPostCode(post);
       const pk = post && (post.pk || post.id);
-
-      if (inspectedCount >= (options.scanLimit || 500)) {
-        dbg(`[media] reached scan limit (${inspectedCount}), stopping inspection`);
-        break;
-      }
 
       if (currentStrictGrid && code && !gridShortcodesIndexMap.has(code) && !gridPkIndexMap.has(String(pk))) {
         dbg(`[media] skipping post ${code} because it's not in the initial grid`);
@@ -1498,14 +1534,13 @@ async function runMediaDownload(outputDir, allPosts, limit, wantPhotos, wantReel
           : path.join(outputDir, `${tsPrefix}media_${result.photos + result.reels + 1}.${ext}`);
 
         dbg(`[media] post ${code} item ${j+1}: ts=${postTs} type=${isV?'reel':'photo'} url=${url.substring(0,80)} -> ${finalPath}`);
-        try {
-          await downloadFile(url, finalPath);
+        if (await downloadFile(url, finalPath)) {
           if (firstDownloadedPath === null) { firstDownloadedPath = finalPath; firstDownloadedUrl = url; }
           if (!isV) { result.imageMap[code] = result.imageMap[code] || []; result.imageMap[code].push(filename); }
           if (isV) result.reels++; else result.photos++;
           dbg(`[media] OK ${isV ? 'reel' : 'photo'} saved to ${finalPath}`);
-        } catch (e) {
-          dbg('[media] FAILED to download', url, e.message);
+        } else {
+          dbg(`[media] FAILED to download ${url}`);
         }
       }
 
@@ -1548,7 +1583,7 @@ async function runMediaDownload(outputDir, allPosts, limit, wantPhotos, wantReel
   // ── Grid Capture Audit ──────────────────────────────────────────────────────
   const nullIndices = mediaMap.filter(m => m.grid_index === null).length;
   if (mediaMap.length > 0 && nullIndices / mediaMap.length >= 0.5) {
-    ui.warn(`Grid capture mismatch occurred (${nullIndices}/${mediaMap.length} items missing index). Audit file saved.`);
+    ui.warn(t('gridMismatch', nullIndices, mediaMap.length));
     await saveDebugFile('grid_payloads', `grid_capture_audit_${options.username || 'unknown'}_${Date.now()}.json`, {
       gridShortcodes,
       domShortcodes,
@@ -1569,14 +1604,26 @@ async function runMediaDownload(outputDir, allPosts, limit, wantPhotos, wantReel
 
     if (currentStrictGrid && result.photos === 0 && result.reels === 0) {
       if (options.strictGridMode === 'fail-loud') {
-        throw new Error(`[Strict-Grid Error] No downloadable posts found in strict-grid mode for ${options.username}. Aborting.`);
+        throw new Error(t('strictGridFailLoud', options.username));
       }
-      ui.warn(`No downloadable posts found in strict-grid mode. Disabling strict-grid and retrying full feed...`);
+      ui.warn(t('strictGridEmpty'));
       currentStrictGrid = false;
       result.photos = 0;
       result.reels = 0;
+      skippedCount = 0;
       if (typeof inspectedCount !== 'undefined') inspectedCount = 0;
+      if (bar && typeof bar.stop === 'function') bar.stop();
       await processPosts();
+      if (bar && typeof bar.stop === 'function') bar.stop();
+      try {
+        const tempPath = path.join(outputDir, 'media_map.json.tmp');
+        fs.writeFileSync(tempPath, JSON.stringify(mediaMap, null, 2));
+        fs.renameSync(tempPath, path.join(outputDir, 'media_map.json'));
+        dbg('[media] media_map.json written atomically with', mediaMap.length, 'entries');
+      } catch (e) {
+        dbg('[media] failed to write media_map.json:', e.message);
+      }
+      return result;
     }
 
   if (bar && typeof bar.stop === 'function') bar.stop();
@@ -1613,25 +1660,42 @@ async function runCaptionDownload(outputDir, allPosts, imageMap) {
 
 async function handleManualLogin() {
   dbg('[Auth] starting manual login flow');
-  ui.sectionHeader('⚠️ AUTHENTICATION REQUIRED');
-  console.log('\nInstagram ha invalidado tu sesión actual (detección de dispositivo).');
-  console.log('Para arreglar esto, necesitamos que obtengas un NUEVO sessionid de Instagram desde tu navegador real (Chrome/Edge/Firefox).\n');
-  console.log('Pasos:');
-  console.log('1. Abre Instagram en tu navegador y loguéate (www.instagram.com).');
-  console.log('2. Abre las DevTools: presiona F12 o clic derecho -> Inspeccionar.');
-  console.log('3. Ve a la pestaña "Application" (o "Almacenamiento" en español).');
-  console.log('4. En el menú izquierdo, expande "Cookies" -> "https://www.instagram.com".');
-  console.log('5. Busca la cookie llamada "sessionid" y copia su valor (es un string largo).');
-  console.log('\nPegá el sessionid aquí abajo y presioná Enter:\n');
+  ui.sectionHeader(t('authRequired'));
+  ui.dim(t('authSessionExpired'));
+  ui.info(t('authSteps1'));
+  ui.info(t('authSteps2'));
+  ui.info(t('authSteps3'));
+  ui.info(t('authSteps4'));
+  ui.info(t('authSteps5'));
+  ui.info(t('authPaste'));
 
   const readline = require('readline');
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const newSessionId = await new Promise(resolve => {
-    rl.question('Session ID: ', answer => { rl.close(); resolve(answer.trim()); });
+    const _onSigint = () => {
+      if (process.stdin.isTTY && process.stdin.setRawMode) {
+        process.stdin.setRawMode(false);
+      }
+      process.exit(130);
+    };
+    process.once('SIGINT', _onSigint);
+    if (process.stdin.isTTY && process.stdin.setRawMode) {
+      process.stdin.setRawMode(true);
+    }
+    rl.question(t('authSessionIdPrompt'), answer => {
+      process.removeListener('SIGINT', _onSigint);
+      if (process.stdin.isTTY && process.stdin.setRawMode) {
+        process.stdin.setRawMode(false);
+      }
+      rl.close(); resolve(answer.trim());
+    });
+    if (process.stdin.isTTY && process.stdin.setRawMode) {
+      rl._writeToOutput = () => {};
+    }
   });
 
   if (!newSessionId) {
-    ui.err('No se proporcionó un sessionid. Abortando.');
+    ui.err(t('authNoSessionId'));
     return;
   }
 
@@ -1670,91 +1734,102 @@ async function handleManualLogin() {
     dbg('[Auth] validation status:', result.status, '| data sample:', JSON.stringify(result.data).substring(0, 200));
     
     if (result.status === 200 && result.data && result.data.data && result.data.data.user) {
-      ui.success('¡Session ID válido (200 OK con datos)! Guardando...');
+      ui.ok(t('authValidSession'));
       _sessionId = newSessionId;
       saveSessionId(_sessionId);
     } else if (result.status === 429) {
-      ui.success('Rate limit (429) - el sessionid parece válido, guardando...');
+      ui.ok(t('authRateLimitAccept'));
       _sessionId = newSessionId;
       saveSessionId(_sessionId);
     } else if (result.status === 200) {
-      ui.success('Status 200 OK - guardando sessionid...');
+      ui.ok(t('authStatusOk'));
       _sessionId = newSessionId;
       saveSessionId(_sessionId);
     } else if (result.data && result.data.require_login) {
-      ui.err('El sessionid fue rechazado por Instagram (require_login: true). No se guarda. Probá con uno más reciente.');
+      ui.err(t('authRejected'));
       // NO save - poisoned session would overwrite a good one
     } else {
-      ui.err(`No se pudo validar (status: ${result.status}). No se guarda. Probá de nuevo.`);
+      ui.err(t('authValidationFailed', result.status));
       // NO save - don't overwrite a possibly valid session with garbage
     }
   } catch (e) {
     dbg('[Auth] validation error:', e.message);
-    ui.err('Error validando: ' + e.message + ' - no se guardó el sessionid.');
+    ui.err(t('authValidationError', e.message));
     // NO save - don't overwrite on connection errors either
   }
 }
 
-async function browserFetchJson(url, _retryCount = 0) {
+async function browserFetchJson(url) {
   const MAX_RETRIES = 1;
-  const page = await getPage();
-
-  // Quick inject sessionid cookie
-  if (_sessionId) {
-    await page.setCookie({
-      name: 'sessionid', value: _sessionId,
-      domain: '.instagram.com', path: '/', httpOnly: true, secure: true,
-    }).catch(() => {});
-  }
-
-  if (!page.url().includes('instagram.com')) {
-    await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-  }
-
   let json;
-  try {
-    await page.evaluate(`window.__igx_fetch_url = ${JSON.stringify(url)};`);
-    json = await page.evaluate(`
-      (async () => {
-        try {
-          const resp = await fetch(window.__igx_fetch_url, {
-            headers: {
-              'Accept': 'application/json, text/plain, */*',
-              'X-IG-App-ID': '936619743392459',
-              'X-Requested-With': 'XMLHttpRequest',
-            },
-            credentials: 'include',
-          });
-          const text = await resp.text();
-          if (!resp.ok) return { __error: resp.status, __body: text.substring(0, 500) };
-          try {
-            return JSON.parse(text);
-          } catch {
-            return { __error: 'JSON_PARSE_FAIL', __body: text.substring(0, 500) };
-          }
-        } catch (e) {
-          return { __error: e.message };
-        }
-      })()
-    `);
-  } catch (evalErr) {
-    dbg('[browserFetch] evaluate threw:', evalErr.message);
-    return { __error: evalErr.message };
-  }
 
-  // AUTH CHECK: If we get a 401 or require_login: true, trigger manual login flow
-  if (json && (json.__error === 401 || json.require_login === true || json.__error === 'JSON_PARSE_FAIL')) {
-    const isLoginPage = json.__body && json.__body.includes('accounts/login');
-    if (json.__error === 401 || json.require_login === true || isLoginPage) {
-        if (_retryCount >= MAX_RETRIES) {
-          dbg('[Auth] Max retries reached. Aborting fetch.');
-          return { __error: 'MAX_RETRIES_EXCEEDED', __body: json.__body };
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const page = await getPage(); // Primary path: Browser required for this operation
+
+    // Quick inject sessionid cookie
+    if (_sessionId) {
+      await page.setCookie({
+        name: 'sessionid', value: _sessionId,
+        domain: '.instagram.com', path: '/', httpOnly: true, secure: true,
+      }).catch(() => {});
+    }
+
+    if (!page.url().includes('instagram.com')) {
+      await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+    }
+
+    try {
+      await page.evaluate(`window.__igx_fetch_url = ${JSON.stringify(url)};`);
+      json = await page.evaluate(`
+        (async () => {
+          try {
+            const resp = await fetch(window.__igx_fetch_url, {
+              headers: {
+                'Accept': 'application/json, text/plain, */*',
+                'X-IG-App-ID': '936619743392459',
+                'X-Requested-With': 'XMLHttpRequest',
+              },
+              credentials: 'include',
+            });
+            const text = await resp.text();
+            if (!resp.ok) return { __error: resp.status, __body: text.substring(0, 500) };
+            try {
+              return JSON.parse(text);
+            } catch {
+              return { __error: 'JSON_PARSE_FAIL', __body: text.substring(0, 500) };
+            }
+          } catch (e) {
+            return { __error: e.message };
+          }
+        })()
+      `);
+    } catch (evalErr) {
+      dbg('[browserFetch] evaluate threw:', evalErr.message);
+      json = { __error: evalErr.message };
+    }
+
+    // Check if auth is needed (only on first attempt)
+    if (attempt < MAX_RETRIES && json && (json.__error === 401 || json.require_login === true || json.__error === 'JSON_PARSE_FAIL')) {
+      const isLoginPage = json.__body && json.__body.includes('accounts/login');
+      if (json.__error === 401 || json.require_login === true || isLoginPage) {
+        if (!process.stdin.isTTY) {
+          throw new Error(t('sessionExpired'));
         }
         dbg('[Auth] Session invalid detected via API. Triggering manual login.');
         await handleManualLogin();
-        // Retry the fetch once after login using a loop instead of recursion to prevent stack overflow
-        return await browserFetchJson(url, _retryCount + 1); 
+        // Loop continues to retry with the new sessionid
+        continue;
+      }
     }
+
+    // If we got here without retrying, break out of the loop
+    break;
+  }
+
+  // If retries exhausted, return error
+  if (json && (json.__error === 401 || json.require_login === true)) {
+    dbg('[Auth] Session still invalid after retry. Aborting.');
+    return { __error: 'MAX_RETRIES_EXCEEDED' };
   }
 
   return json;
@@ -1782,7 +1857,7 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
     let nextMinId = null;
     let hasMore   = true;
     if (bar.isActive) bar.stop();
-    const spinner = ui.createSpinner(`Post ${i + 1}/${postsToScan.length} (${code}): obteniendo comentarios`);
+    const spinner = ui.createSpinner(t('commentSpinnerProgress', i + 1, postsToScan.length, code, t('commentSpinnerFetching')));
     spinner.start();
 
     try {
@@ -1820,17 +1895,17 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
             likes:     c.comment_like_count || 0,
           });
         }
-        spinner.update(`Post ${i + 1}/${postsToScan.length} (${code}): ${postComments.length} comentarios...`);
+        spinner.update(t('commentSpinnerProgress', i + 1, postsToScan.length, code, t('commentSpinnerCount', postComments.length)));
         hasMore   = json.has_more_comments || json.has_more_headload_comments || false;
         nextMinId = json.next_min_id || null;
         if (!nextMinId) hasMore = false;
         if (hasMore) await sleep(800);
       }
-      spinner.stop(`Post ${code}: ${postComments.length} comentarios`);
+      spinner.stop(t('commentSpinnerProgress', i + 1, postsToScan.length, code, t('commentSpinnerCount', postComments.length)));
       commentsMap[code] = postComments;
       dbg('[comments] post', code, '->', postComments.length, 'comments');
     } catch (e) {
-      spinner.fail(`Post ${code}: error`);
+      spinner.fail(t('commentSpinnerError', code));
       dbg('[comments] error for', code, e.message);
       commentsMap[code] = [];
     }
@@ -1844,12 +1919,12 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
 
 async function runStoriesDownload(outputDir, profileData) {
   const userId = profileData.pk || profileData.id;
-  console.error('[DIAG][stories] userId:', userId, '| profileData keys:', Object.keys(profileData).join(', '));
+  dbg('[DIAG][stories] userId:', userId, '| profileData keys:', Object.keys(profileData).join(', '));
   if (!userId) {
-    ui.err('User ID not found, cannot download stories');
+    ui.err(t('storiesNoUserId'));
     return 0;
   }
-  ui.sectionHeader(t('fetchingStories') || 'Fetching stories...');
+  ui.sectionHeader(t('downloadingStories'));
   const storiesDir = path.join(outputDir, 'stories');
   if (!fs.existsSync(storiesDir)) fs.mkdirSync(storiesDir, { recursive: true });
 
@@ -1874,9 +1949,9 @@ async function runStoriesDownload(outputDir, profileData) {
         continue;
       }
       dbg('[stories] API response top-level keys:', Object.keys(json).join(', '));
-      console.error('[DIAG] stories endpoint:', endpoint.substring(0, 80), '| status:', json.status || 'ok', '| keys:', Object.keys(json).join(','));
-      if (json.reels_media) console.error('[DIAG] reels_media length:', json.reels_media.length);
-      if (json.reels) console.error('[DIAG] reels keys:', Object.keys(json.reels).join(','));
+      dbg('[DIAG] stories endpoint:', endpoint.substring(0, 80), '| status:', json.status || 'ok', '| keys:', Object.keys(json).join(','));
+      if (json.reels_media) dbg('[DIAG] reels_media length:', json.reels_media.length);
+      if (json.reels) dbg('[DIAG] reels keys:', Object.keys(json.reels).join(','));
       const reelsMedia = json.reels_media ||
         (json.reel && [json.reel]) ||
         (json.reels && Object.values(json.reels)) ||
@@ -1907,11 +1982,12 @@ async function runStoriesDownload(outputDir, profileData) {
   dbg('[stories] total story items to download:', storyItems.length);
 
   if (storyItems.length === 0) {
-    ui.warn('No stories found (profile may have no active stories, or stories require a different session)');
+    ui.warn(t('storiesNotFound'));
     return 0;
   }
 
-  const bar = ui.createProgressBar(t('storyLabel') || 'Story', 'brand');
+  let downloadedCount = 0;
+  const bar = ui.createProgressBar(t('storyLabel'), 'brand');
   for (let i = 0; i < storyItems.length; i++) {
     const item = storyItems[i];
     const tsPart = item.ts && item.ts > 0 ? `${item.ts}_` : '';
@@ -1919,8 +1995,10 @@ async function runStoriesDownload(outputDir, profileData) {
     const dest = path.join(storiesDir, filename);
     dbg(`[stories] downloading story ${i + 1}: ${item.url.substring(0, 80)} -> ${dest}`);
     try {
-      await downloadFile(item.url, dest);
-      dbg(`[stories] OK story ${i + 1} saved`);
+      if (await downloadFile(item.url, dest)) {
+        downloadedCount++;
+        dbg(`[stories] OK story ${i + 1} saved`);
+      }
     } catch (e) {
       dbg(`[stories] FAILED story ${i + 1}:`, e.message);
     }
@@ -1928,7 +2006,7 @@ async function runStoriesDownload(outputDir, profileData) {
   }
   if (bar && typeof bar.stop === 'function') bar.stop();
 
-  return storyItems.length;
+  return downloadedCount;
 }
 
 async function runFollowersDownload(outputDir, profileData) {

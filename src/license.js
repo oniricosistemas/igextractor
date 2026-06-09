@@ -35,7 +35,7 @@ function readApiKey() {
 function saveApiKey(key) {
   let content = readEnvRaw();
   content = content.replace(/IGX_API_KEY=[^\n]*\n?/g, '');
-  content += `IGX_API_KEY=${key.trim()}\n`;
+  content += `IGX_API_KEY=${key.trim().replace(/[\r\n]/g, '')}\n`;
   writeEnvRaw(content);
 }
 
@@ -44,6 +44,7 @@ function removeApiKey() {
   if (!content) return;
   content = content.replace(/IGX_API_KEY=[^\n]*\n?/g, '');
   writeEnvRaw(content);
+  setPlan('free');
 }
 
 function readSessionId() {
@@ -58,7 +59,7 @@ function readSessionId() {
 function saveSessionId(sessionId) {
   let content = readEnvRaw();
   content = content.replace(/IGX_SESSION=[^\n]*\n?/g, '');
-  if (sessionId && sessionId.trim()) content += `IGX_SESSION=${sessionId.trim()}\n`;
+  if (sessionId && sessionId.trim()) content += `IGX_SESSION=${sessionId.trim().replace(/[\r\n]/g, '')}\n`;
   writeEnvRaw(content);
 }
 
@@ -102,6 +103,3 @@ function getPlan()  { return _cachedPlan || 'free'; }
 function setPlan(p) { _cachedPlan = p; }
 
 module.exports = { readApiKey, saveApiKey, removeApiKey, validateKey, checkLicense, isPro, getPlan, setPlan, ENV_FILE, readSessionId, saveSessionId };
-
-module.exports.readSessionId = readSessionId;
-module.exports.saveSessionId = saveSessionId;

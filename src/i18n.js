@@ -2,7 +2,12 @@
 
 const fs   = require('fs');
 const path = require('path');
-const ENV  = path.join(process.env.HOME || process.env.USERPROFILE || '.', '.igextractor.env');
+const { ENV_FILE: ENV } = require('./license');
+
+function maskKey(key) {
+  if (!key || key.length <= 8) return key;
+  return key.slice(0, 4) + '****...' + key.slice(-4);
+}
 
 const STRINGS = {
   en: {
@@ -30,6 +35,11 @@ const STRINGS = {
     profileNotFound:     username => `Profile @${username} not found. It may be private, suspended, or the username is incorrect.`,
     profileFetchError:   msg => `Profile fetch error: ${msg}`,
     abortingExtraction:  'Aborting extraction.',
+    extractionFailed:      msg => `Extraction failed: ${msg}`,
+    storiesNoUserId:        'User ID not found, cannot download stories',
+    storiesNotFound:        'No active stories found for this profile',
+    needProfileAfterFlag:   'Please provide a username after --profile or -p',
+    missingSessionIdValue:  'Missing value for --session-id',
     tryAgainOrBack:      'What would you like to do?',
     optTryAgain:         '  Try another username',
     optGoBack:           '  Back to main menu',
@@ -37,6 +47,28 @@ const STRINGS = {
     askSessionAll:       'Instagram session ID (leave blank to skip):',
     sessionSaved:        'Session ID saved.',
     sessionHint:         'A session ID is required to access Instagram. Get it from your browser cookies.',
+    sessionMasked:       sessionId => `Session ID: ${'*'.repeat(12)}...${sessionId.slice(-6)} (saved)`,
+
+    authRequired:        '⚠️ AUTHENTICATION REQUIRED',
+    authSessionExpired:  'Your Instagram session has expired (device detection). We need a new sessionid from your real browser (Chrome/Edge/Firefox).',
+    authSteps1:          '1. Open Instagram in your browser and log in (www.instagram.com).',
+    authSteps2:          '2. Open DevTools: press F12 or right-click -> Inspect.',
+    authSteps3:          '3. Go to the "Application" tab (or "Storage" in some versions).',
+    authSteps4:          '4. In the left menu, expand "Cookies" -> "https://www.instagram.com".',
+    authSteps5:          '5. Find the "sessionid" cookie and copy its value (a long string).',
+    authPaste:           '\nPaste the sessionid below and press Enter:\n',
+    authNoSessionId:       'No session ID provided. Aborting.',
+    authValidSession:      'Valid Session ID (200 OK with data)! Saving...',
+    authRateLimitAccept:   'Rate limit (429) - session ID seems valid, saving...',
+    authStatusOk:          'Status 200 OK - saving session ID...',
+    authRejected:          'The session ID was rejected by Instagram (require_login: true). Not saving. Try a more recent one.',
+    authValidationFailed:  status => `Could not validate (status: ${status}). Not saving. Try again.`,
+    authValidationError:   msg => `Validation error: ${msg} - session ID not saved.`,
+    authSessionIdPrompt:   'Session ID: ',
+    commentSpinnerProgress: (current, total, code, msg) => `Post ${current}/${total} (${code}): ${msg}`,
+    commentSpinnerFetching: 'Fetching comments...',
+    commentSpinnerCount:    count => `Found ${count} comments...`,
+    commentSpinnerError:    code => `Post ${code}: error`,
     noSessionWarn:       'No session ID provided. Profile access may fail. Consider adding one.',
 
     askWhatDownload:     'What to download?',
@@ -84,9 +116,13 @@ const STRINGS = {
     optCaptions:         'Post captions',
 
     extractComplete:     'Extraction Complete',
+    summaryMetric:       'Metric',
+    summaryValue:        'Value',
     summaryUsername:     'Username',
     summaryOutput:       'Output directory',
     summaryImages:       'Images downloaded',
+    summaryReels:        'Reels',
+    summaryCaptions:     'Captions',
     summaryStories:      'Stories downloaded',
     summaryComments:     'Comments saved',
     summaryFollowers:    'Followers saved',
@@ -95,6 +131,15 @@ const STRINGS = {
 
     apiKeyMgmt:          'API Key Management',
     currentKey:          key => `Current key: ${key}`,
+    extractingProfile:   username => `Extracting @${username}`,
+    authBrowserSteps:    'Chrome/Firefox: F12 -> Application -> Cookies -> instagram.com -> sessionid',
+    nonInteractiveStart: username => `Starting non-interactive extraction for: ${username}...`,
+    nonInteractiveEnd:   username => `Extraction completed for ${username}`,
+    nonInteractiveFail:  msg => `Extraction failed: ${msg}`,
+    invalidDownloadLimit:'Invalid --download-limit value, using default.',
+    invalidScanLimit:    'Invalid --scan-limit value, using default.',
+    invalidMaxAgeDays:   'Invalid --max-age-days value, using default.',
+    missingOutputDir:    'Missing value for --output-dir, using default.',
     noKey:               'No API key configured (running on Free plan).',
     chooseAction:        'Choose an action:',
     setKey:              '  Enter / update API key',
@@ -122,7 +167,7 @@ const STRINGS = {
     usageProLine:        'Pro plan: Unlimited. All features. Proxy support.',
 
     noKeyProvided:       'Please provide an API key: igextractor -apiKey YOUR-KEY',
-    validatingDots:      key => `Validating key: ${key.slice(0, 12)}...`,
+    validatingDots:      key => `Validating key: ${maskKey(key)}`,
     keySavedTo:          f => `Key saved to: ${f}`,
     keyInvalidCli:       msg => `Invalid key: ${msg || 'Key not recognized'}`,
 
@@ -136,7 +181,11 @@ const STRINGS = {
     planLabel:           p => `Plan: ${p}`,
     imageLabel:          'image',
     storyLabel:          'story',
+    reelLabel:           'Reel',
     commentLabel:        'comments',
+    captionLabel:        'Captions',
+    followerLabel:       'Followers',
+    followingLabel:      'Following',
 
     fetchingProfile:     'Fetching profile information...',
 
@@ -172,11 +221,24 @@ const STRINGS = {
 
     // Download status
     downloadingReels:    'Downloading Reels',
+    downloadingImagesReels: 'Downloading Images + Reels',
     downloadedReels:     n => `Downloaded ${n} reels`,
     noReelsFound:        'No reels found for this profile.',
     savedCaptionsTxt:    'captions.txt saved (human-readable)',
     storiesSoon:         'Stories download: coming soon.', // legacy
     noMediaId:           'No user ID available — cannot fetch media.',
+    skippedItems:        count => `Skipped ${count} items`,
+    notInGrid:           'not in grid',
+    gridMismatch:        (nullIndices, total) => `Grid capture mismatch occurred (${nullIndices}/${total} items missing index). Audit file saved.`,
+    strictGridEmpty:     'No downloadable posts found in strict-grid mode. Disabling strict-grid and retrying full feed...',
+    navFailFirstGoto: 'Navigation failed: unexpected URL after first goto',
+  navFailSessionGoto: 'Navigation failed: unexpected URL after session goto',
+  emptyResponse: 'Empty response from Instagram',
+  noJsonPayload: 'No JSON payload received from all fetch attempts',
+  debugEnabled: 'Debug mode enabled',
+
+  sessionExpired: 'Session expired. Run interactively to relogin.',
+    strictGridFailLoud:  username => `No downloadable posts found in strict-grid mode for @${username}. Aborting.`,
 
     // Free limit warning (in ui.js)
     freeLimitTitle:      'Free plan limit:',
@@ -193,6 +255,16 @@ const STRINGS = {
     cardVerified:        'Verified   ',
     cardYes:             'Yes',
     cardNo:              'No',
+
+    // UI box titles & tagline
+    tagline:            v => `  Instagram Data Extraction Tool  v${v}  `,
+    boxInfo:            ' ℹ INFO ',
+    boxSuccess:         ' ✓ SUCCESS ',
+    boxWarning:         ' ⚠ WARNING ',
+    boxError:           ' ✗ ERROR ',
+    boxPro:             ' ★ PRO ',
+    profileCardTitle:   ' Instagram Profile ',
+    proFeatureHeader:   ' ★ PRO FEATURE REQUIRED ',
   },
 
   es: {
@@ -220,6 +292,11 @@ const STRINGS = {
     profileNotFound:     username => `Perfil @${username} no encontrado. Puede ser privado, estar suspendido, o el usuario no existe.`,
     profileFetchError:   msg => `Error al obtener perfil: ${msg}`,
     abortingExtraction:  'Abortando la extraccion.',
+    extractionFailed:      msg => `Error en la extraccion: ${msg}`,
+    storiesNoUserId:        'No se encontro el ID de usuario, no se pueden descargar las stories',
+    storiesNotFound:        'No se encontraron stories activas para este perfil',
+    needProfileAfterFlag:   'Por favor, ingrese un usuario despues de --profile o -p',
+    missingSessionIdValue:  'Falta el valor para --session-id',
     tryAgainOrBack:      'Que queres hacer?',
     optTryAgain:         '  Intentar con otro usuario',
     optGoBack:           '  Volver al menu principal',
@@ -228,6 +305,28 @@ const STRINGS = {
     sessionSaved:        'Session ID guardado.',
     sessionHint:         'Un session ID es necesario para acceder a Instagram. Obtenerlo de las cookies del browser.',
     noSessionWarn:       'No se ingreso session ID. El acceso al perfil puede fallar. Se recomienda agregarlo.',
+    sessionMasked:       sessionId => `Session ID: ${'*'.repeat(12)}...${sessionId.slice(-6)} (guardado)`,
+    authNoSessionId:       'No se proporcionó un sessionid. Abortando.',
+    authValidSession:      '¡Session ID válido (200 OK con datos)! Guardando...',
+    authRateLimitAccept:   'Rate limit (429) - el sessionid parece válido, guardando...',
+    authStatusOk:          'Status 200 OK - guardando sessionid...',
+    authRejected:          'El sessionid fue rechazado por Instagram (require_login: true). No se guarda. Probá con uno más reciente.',
+    authValidationFailed:  status => `No se pudo validar (status: ${status}). No se guarda. Probá de nuevo.`,
+    authValidationError:   msg => `Error validando: ${msg} - no se guardó el sessionid.`,
+    authSessionIdPrompt:   'Session ID: ',
+    commentSpinnerProgress: (current, total, code, msg) => `Progreso ${current}/${total} (${code}): ${msg}`,
+    commentSpinnerFetching: 'Obteniendo comentarios...',
+    commentSpinnerCount:    count => `Encontrados ${count} comentarios...`,
+    commentSpinnerError:    code => `Post ${code}: error`,
+
+    authRequired:        '⚠️ AUTENTICACION REQUERIDA',
+    authSessionExpired:  'Instagram ha invalidado tu sesion actual (deteccion de dispositivo). Necesitamos un NUEVO sessionid desde tu navegador real (Chrome/Edge/Firefox).',
+    authSteps1:          '1. Abri Instagram en tu navegador y logueate (www.instagram.com).',
+    authSteps2:          '2. Abri las DevTools: presiona F12 o clic derecho -> Inspeccionar.',
+    authSteps3:          '3. Anda a la pestania "Application" (o "Almacenamiento" en espanol).',
+    authSteps4:          '4. En el menu izquierdo, expandi "Cookies" -> "https://www.instagram.com".',
+    authSteps5:          '5. Busca la cookie llamada "sessionid" y copia su valor (es un string largo).',
+    authPaste:           '\nPegá el sessionid aca abajo y presiona Enter:\n',
 
     askWhatDownload:     'Que queres descargar?',
     optImages:           'Imagenes',
@@ -274,9 +373,13 @@ const STRINGS = {
     optCaptions:         'Textos de publicaciones',
 
     extractComplete:     'Extraccion Completa',
+    summaryMetric:       'Métrica',
+    summaryValue:        'Valor',
     summaryUsername:     'Usuario',
     summaryOutput:       'Directorio de salida',
     summaryImages:       'Imagenes descargadas',
+    summaryReels:        'Reels',
+    summaryCaptions:     'Textos',
     summaryStories:      'Stories descargados',
     summaryComments:     'Comentarios guardados',
     summaryFollowers:    'Seguidores guardados',
@@ -285,6 +388,15 @@ const STRINGS = {
 
     apiKeyMgmt:          'Gestion de API Key',
     currentKey:          key => `Key actual: ${key}`,
+    extractingProfile:   username => `Extrayendo @${username}`,
+    authBrowserSteps:    'Chrome/Firefox: F12 -> Aplicacion -> Cookies -> instagram.com -> sessionid',
+    nonInteractiveStart: username => `Iniciando extraccion no interactiva para: ${username}...`,
+    nonInteractiveEnd:   username => `Extraccion completada para ${username}`,
+    nonInteractiveFail:  msg => `Error en la extraccion: ${msg}`,
+    invalidDownloadLimit:'Valor invalido para --download-limit, usando el predeterminado.',
+    invalidScanLimit:    'Valor invalido para --scan-limit, usando el predeterminado.',
+    invalidMaxAgeDays:   'Valor invalido para --max-age-days, usando el predeterminado.',
+    missingOutputDir:    'Falta el valor para --output-dir, usando el predeterminado.',
     noKey:               'No hay API key configurada (ejecutando en plan Gratuito).',
     chooseAction:        'Elegi una accion:',
     setKey:              '  Ingresar / actualizar API key',
@@ -312,7 +424,7 @@ const STRINGS = {
     usageProLine:        'Plan Pro: Ilimitado. Todas las funciones. Soporte de proxy.',
 
     noKeyProvided:       'Por favor proporciona una API key: igextractor -apiKey TU-KEY',
-    validatingDots:      key => `Validando key: ${key.slice(0, 12)}...`,
+    validatingDots:      key => `Validando key: ${maskKey(key)}`,
     keySavedTo:          f => `Key guardada en: ${f}`,
     keyInvalidCli:       msg => `Key invalida: ${msg || 'Key no reconocida'}`,
 
@@ -326,7 +438,11 @@ const STRINGS = {
     planLabel:           p => `Plan: ${p}`,
     imageLabel:          'imagen',
     storyLabel:          'story',
+    reelLabel:           'Reel',
     commentLabel:        'comentarios',
+    captionLabel:        'Descripciones',
+    followerLabel:       'Seguidores',
+    followingLabel:      'Seguidos',
 
     fetchingProfile:     'Obteniendo informacion del perfil...',
 
@@ -362,11 +478,25 @@ const STRINGS = {
 
     // Download status
     downloadingReels:    'Descargando Reels',
+    downloadingImagesReels: 'Descargando Imagenes + Reels',
     downloadedReels:     n => `Se descargaron ${n} reels`,
     noReelsFound:        'No se encontraron reels en este perfil.',
     savedCaptionsTxt:    'captions.txt guardado (formato legible)',
     storiesSoon:         'Descarga de Stories: proximamente.', // legacy
     noMediaId:           'Sin ID de usuario — no se puede obtener el contenido.',
+    skippedItems:        count => `Se saltaron ${count} elementos`,
+    notInGrid:           'no están en la cuadrícula',
+    gridMismatch:        (nullIndices, total) => `Se produjo una discrepancia en la captura de cuadrícula (${nullIndices}/${total} elementos sin índice). Archivo de auditoría guardado.`,
+    strictGridEmpty:     'No se encontraron publicaciones descargables en modo de cuadrícula estricta. Desactivando modo estricto y reintentando con el feed completo...',
+    navFailFirstGoto: 'Navegación fallida: URL inesperada tras el primer goto',
+  navFailSessionGoto: 'Navegación fallida: URL inesperada tras el goto de sesión',
+  emptyResponse: 'Respuesta vacía de Instagram',
+  noJsonPayload: 'No se recibió ningún payload JSON en todos los intentos de extracción',
+  debugEnabled: 'Modo debug activado',
+
+  sessionExpired: 'Sesión expirada. Ejecuta el modo interactivo para volver a loguearte.',
+
+    strictGridFailLoud:  username => `No se encontraron posts descargables en modo strict-grid para @${username}. Abortando.`,
 
     // Free limit warning (in ui.js)
     freeLimitTitle:      'Limite plan gratuito:',
@@ -383,6 +513,16 @@ const STRINGS = {
     cardVerified:        'Verificado ',
     cardYes:             'Si',
     cardNo:              'No',
+
+    // UI box titles & tagline
+    tagline:            v => `  Herramienta de Extracción de Datos de Instagram  v${v}  `,
+    boxInfo:            ' ℹ INFO ',
+    boxSuccess:         ' ✓ SUCCESS ',
+    boxWarning:         ' ⚠ WARNING ',
+    boxError:           ' ✗ ERROR ',
+    boxPro:             ' ★ PRO ',
+    profileCardTitle:   ' Perfil de Instagram ',
+    proFeatureHeader:   ' ★ FUNCIÓN PRO REQUERIDA ',
   },
 };
 
@@ -415,4 +555,4 @@ function saveLang(lang) {
   } catch {}
 }
 
-module.exports = { t, setLang, getLang, loadSavedLang, saveLang, STRINGS };
+module.exports = { t, setLang, getLang, loadSavedLang, saveLang, STRINGS, maskKey };

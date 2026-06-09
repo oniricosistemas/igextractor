@@ -12,7 +12,7 @@ async function run() {
   // ── Debug flag (-d / -debug) ─────────────────────────────────────────────────
   if (args.includes('-d') || args.includes('-debug') || args.includes('--debug')) {
     setDebug(true);
-    console.log('[DEBUG] Debug mode enabled');
+    ui.info(t('debugEnabled'));
   }
   const cmd  = args[0];
 
@@ -67,7 +67,7 @@ async function run() {
     }
 
     if (!username || username.startsWith('-')) {
-      ui.err('Please provide a username after --profile or -p');
+      ui.err(t('needProfileAfterFlag'));
       process.exit(1);
     }
 
@@ -90,7 +90,7 @@ async function run() {
         ? sessionIdArg.split('=')[1] 
         : args[args.indexOf(sessionIdArg) + 1];
       if (!options.sessionId || options.sessionId.startsWith('-')) {
-        ui.err('Missing value for --session-id');
+        ui.err(t('missingSessionIdValue'));
         process.exit(1);
       }
     } else {
@@ -112,7 +112,7 @@ async function run() {
         ? parseInt(limitArg.split('=')[1], 10)
         : parseInt(getArgValue('--download-limit'), 10);
       if (!isNaN(val) && val > 0) options.downloadLimit = val;
-      else ui.warn(`Invalid --download-limit value, using default.`);
+      else ui.warn(t('invalidDownloadLimit'));
     }
     const scanLimitArg = args.find(a => a.startsWith('--scan-limit=') || a === '--scan-limit');
     if (scanLimitArg) {
@@ -120,7 +120,7 @@ async function run() {
         ? parseInt(scanLimitArg.split('=')[1], 10)
         : parseInt(getArgValue('--scan-limit'), 10);
       if (!isNaN(val) && val > 0) options.scanLimit = val;
-      else ui.warn(`Invalid --scan-limit value, using default.`);
+      else ui.warn(t('invalidScanLimit'));
     }
 
     const maxAgeArg = args.find(a => a.startsWith('--max-age-days=') || a === '--max-age-days');
@@ -129,7 +129,7 @@ async function run() {
         ? parseInt(maxAgeArg.split('=')[1], 10)
         : parseInt(getArgValue('--max-age-days'), 10);
       if (!isNaN(val) && val > 0) options.maxAgeDays = val;
-      else ui.warn(`Invalid --max-age-days value, using default.`);
+      else ui.warn(t('invalidMaxAgeDays'));
     }
 
     const dirArg = args.find(a => a.startsWith('--output-dir=') || a === '--output-dir');
@@ -137,7 +137,7 @@ async function run() {
       options.outputDir = dirArg.startsWith('--output-dir=')
         ? dirArg.split('=')[1]
         : getArgValue('--output-dir');
-      if (!options.outputDir) ui.warn(`Missing value for --output-dir, using default.`);
+      if (!options.outputDir) ui.warn(t('missingOutputDir'));
     }
 
     if (args.includes('--strict-grid')) options.strictGrid = true;
@@ -183,12 +183,12 @@ async function run() {
 
     try {
       const { extractProfile } = require('./scraper');
-      ui.info(`Starting non-interactive extraction for: ${username}...`);
+      ui.info(t('nonInteractiveStart', username));
       await extractProfile(username, options);
-      ui.ok(`Extraction completed for ${username}`);
+      ui.ok(t('nonInteractiveEnd', username));
       process.exit(0);
     } catch (e) {
-      ui.err(`Extraction failed: ${e.message}`);
+      ui.err(t('nonInteractiveFail', e.message));
       // Print stack for debugging when running from CLI
       try { console.error(e.stack); } catch (err) {}
       process.exit(1);
@@ -242,7 +242,7 @@ async function selectLanguage() {
   const { lang } = await inquirer.prompt([{
     type:    'list',
     name:    'lang',
-    message: ui.C.cyan('Select language / Seleccionar idioma:'),
+    message: ui.C.cyan(t('selectLanguage')),
     prefix:  ' ',
     choices: [
       { name: '🇺🇸  English', value: 'en' },

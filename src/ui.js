@@ -7,6 +7,7 @@ const gradient = _grad.default || _grad;
 const boxen    = require('boxen');
 const cliProgress = require('cli-progress');
 const Table    = require('cli-table3');
+const { t }   = require('./i18n');
 
 // ─── Safe hex helper ──────────────────────────────────────────────────────────
 function hex(code) {
@@ -45,7 +46,7 @@ function printLogo() {
   console.log('\n' + igGradient(indented));
 
   const pkg = require('../package.json');
-  const tagline = `  Instagram Data Extraction Tool  v${pkg.version}  `;
+  const tagline = t('tagline', pkg.version);
   const pad = 18;
   console.log(
     '    ' + C.dim('─'.repeat(pad)) +
@@ -145,11 +146,11 @@ function sectionHeader(title) {
 // ─── Info box ─────────────────────────────────────────────────────────────────
 function infoBox(content, type = 'info') {
   const styles = {
-    info:    { border: 'cyan',   title: C.cyan(' ℹ INFO ') },
-    success: { border: 'green',  title: C.green(' ✓ SUCCESS ') },
-    warning: { border: 'yellow', title: C.gold(' ⚠ WARNING ') },
-    error:   { border: 'red',    title: C.red(' ✗ ERROR ') },
-    pro:     { border: 'yellow', title: proGradient(' ★ PRO ') },
+    info:    { border: 'cyan',   title: C.cyan(t('boxInfo')) },
+    success: { border: 'green',  title: C.green(t('boxSuccess')) },
+    warning: { border: 'yellow', title: C.gold(t('boxWarning')) },
+    error:   { border: 'red',    title: C.red(t('boxError')) },
+    pro:     { border: 'yellow', title: proGradient(t('boxPro')) },
   };
   const s = styles[type] || styles.info;
   console.log(boxen(content, {
@@ -227,7 +228,7 @@ function profileCard(data) {
     margin:         { top: 0, bottom: 1, left: 2, right: 0 },
     borderStyle:    'double',
     borderColor:    'magenta',
-    title:          C.brand(' Instagram Profile '),
+    title:          C.brand(t('profileCardTitle')),
     titleAlignment: 'center',
   }));
 }
@@ -235,7 +236,7 @@ function profileCard(data) {
 // ─── Stats table ──────────────────────────────────────────────────────────────
 function statsTable(rows) {
   const table = new Table({
-    head:  [C.cyan('Metric'), C.cyan('Value')],
+    head:  [C.cyan(t('summaryMetric')), C.cyan(t('summaryValue'))],
     style: { border: ['dim'], head: [] },
     chars: {
       'top': '─', 'top-mid': '┬', 'top-left': '╭', 'top-right': '╮',
@@ -251,7 +252,7 @@ function statsTable(rows) {
 
 // ─── Free plan limit warning ──────────────────────────────────────────────────
 function freeLimitWarning(current, max) {
-  const pct    = Math.round((current / max) * 100);
+  const pct    = max > 0 ? Math.round((current / max) * 100) : 0;
   const filled = Math.round(pct / 5);
   const empty  = 20 - filled;
   const color  = pct >= 80 ? C.red : pct >= 50 ? C.gold : C.green;
@@ -270,7 +271,7 @@ function freeLimitWarning(current, max) {
 // ─── Upgrade box ──────────────────────────────────────────────────────────────
 function upgradeBox(feature) {
   const { t } = require('./i18n');
-  infoBox(proGradient(' ★ PRO FEATURE REQUIRED\n\n') + C.gray(t('upgradeRequired', feature)), 'pro');
+  infoBox(proGradient(t('proFeatureHeader') + '\n\n') + C.gray(t('upgradeRequired', feature)), 'pro');
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────

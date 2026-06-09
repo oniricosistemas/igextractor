@@ -5,3 +5,4 @@ node_modules/
 ig_*/
 .temp_env
 debug/
+dist/

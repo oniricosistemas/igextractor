@@ -2,7 +2,7 @@
 
 const inquirer = require('inquirer');
 const ui       = require('./ui');
-const { t }    = require('./i18n');
+const { t, maskKey }    = require('./i18n');
 const { isPro }                          = require('./license');
 const { readSessionId, saveSessionId }   = require('./license');
 const { fetchProfileOnly, extractProfile } = require('./scraper');
@@ -68,7 +68,7 @@ async function extractFlow(pro) {
     ui.newline();
     ui.infoBox(
       ui.C.cyan(t('sessionHint')) + '\n\n' +
-      ui.C.gray('Chrome/Firefox: F12 -> Application -> Cookies -> instagram.com -> sessionid'),
+      ui.C.gray(t('authBrowserSteps')),
       'info'
     );
     const { session } = await inquirer.prompt([{
@@ -87,7 +87,7 @@ async function extractFlow(pro) {
       ui.warn(t('noSessionWarn'));
     }
   } else {
-    ui.dim(`Session ID: ${'*'.repeat(12)}...${savedSession.slice(-6)} (saved)`);
+    ui.dim(t('sessionMasked', savedSession));
   }
 
   ui.newline();
@@ -97,14 +97,16 @@ async function extractFlow(pro) {
   spin.start();
 
   let profileData = null;
+  let profileError = null;
   try {
     profileData = await fetchProfileOnly(username, { sessionId });
   } catch (e) {
+    profileError = e;
     console.error('[ERROR] fetchProfileOnly threw:', e && e.message);
   }
 
   if (!profileData) {
-    spin.fail(t('profileNotFound', username));
+    spin.fail(profileError ? t('profileFetchError', profileError.message) : t('profileNotFound', username));
     ui.newline();
 
     // Offer retry or back
@@ -257,7 +259,7 @@ async function extractFlow(pro) {
     });
     if (!result.aborted) printSummary(result);
   } catch (e) {
-    ui.err('Extraction failed: ' + e.message);
+    ui.err(t('extractionFailed', e.message));
   }
 
   ui.newline();
@@ -330,6 +332,7 @@ async function apiKeyMenu() {
 
   if (result.valid) {
     license.saveApiKey(newKey.trim());
+    license.setPlan('pro');
     ui.newline();
     ui.infoBox(ui.proGradient(t('proActivated')), 'success');
   } else {
@@ -346,9 +349,9 @@ function printSummary(result) {
     [t('summaryOutput'),   result.outputDir],
   ];
   if (result.summary.images    != null) rows.push([t('summaryImages'),    String(result.summary.images)]);
-  if (result.summary.reels     != null) rows.push(['Reels',               String(result.summary.reels)]);
+  if (result.summary.reels     != null) rows.push([t('summaryReels'),     String(result.summary.reels)]);
   if (result.summary.stories   != null) rows.push([t('summaryStories'),   String(result.summary.stories)]);
-  if (result.summary.captions  != null) rows.push(['Captions/Textos',     String(result.summary.captions)]);
+  if (result.summary.captions  != null) rows.push([t('summaryCaptions'),  String(result.summary.captions)]);
   if (result.summary.comments  != null) rows.push([t('summaryComments'),  String(result.summary.comments)]);
   if (result.summary.followers != null) rows.push([t('summaryFollowers'), String(result.summary.followers)]);
   if (result.summary.following != null) rows.push([t('summaryFollowing'), String(result.summary.following)]);
@@ -359,9 +362,4 @@ function printSummary(result) {
   ui.ok(t('allDone', result.outputDir));
 }
 
-function maskKey(key) {
-  const p = key.split('-');
-  return p.length < 4 ? key.slice(0, 8) + '...' : `${p[0]}-${p[1]}-****-****`;
-}
-
-module.exports = { mainMenu, extractFlow, apiKeyMenu };
+module.exports = { mainMenu, extractFlow, apiKeyMenu, maskKey };
