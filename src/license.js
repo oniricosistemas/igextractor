@@ -10,35 +10,56 @@ const TIMEOUT  = 6000;
 
 let _cachedPlan = null;
 
+// ─── Read/save env helpers (with BOM stripping for Windows) ──────────────────
+function readEnvRaw() {
+  try {
+    if (!fs.existsSync(ENV_FILE)) return '';
+    return fs.readFileSync(ENV_FILE, 'utf8').replace(/^\uFEFF/, '');
+  } catch { return ''; }
+}
+
+function writeEnvRaw(content) {
+  fs.writeFileSync(ENV_FILE, content.replace(/^\uFEFF/, ''), { mode: 0o600 });
+}
+
 // ─── Read/Write .env ──────────────────────────────────────────────────────────
 function readApiKey() {
   try {
-    if (!fs.existsSync(ENV_FILE)) return null;
-    const content = fs.readFileSync(ENV_FILE, 'utf8');
+    const content = readEnvRaw();
+    if (!content) return null;
     const match = content.match(/IGX_API_KEY=([^\s\n]+)/);
     return match ? match[1].trim() : null;
   } catch { return null; }
 }
 
 function saveApiKey(key) {
-  let content = '';
-  try {
-    if (fs.existsSync(ENV_FILE)) {
-      content = fs.readFileSync(ENV_FILE, 'utf8');
-      content = content.replace(/IGX_API_KEY=[^\n]*\n?/g, '');
-    }
-  } catch {}
+  let content = readEnvRaw();
+  content = content.replace(/IGX_API_KEY=[^\n]*\n?/g, '');
   content += `IGX_API_KEY=${key.trim()}\n`;
-  fs.writeFileSync(ENV_FILE, content, { mode: 0o600 });
+  writeEnvRaw(content);
 }
 
 function removeApiKey() {
+  let content = readEnvRaw();
+  if (!content) return;
+  content = content.replace(/IGX_API_KEY=[^\n]*\n?/g, '');
+  writeEnvRaw(content);
+}
+
+function readSessionId() {
   try {
-    if (!fs.existsSync(ENV_FILE)) return;
-    let content = fs.readFileSync(ENV_FILE, 'utf8');
-    content = content.replace(/IGX_API_KEY=[^\n]*\n?/g, '');
-    fs.writeFileSync(ENV_FILE, content, { mode: 0o600 });
-  } catch {}
+    const content = readEnvRaw();
+    if (!content) return null;
+    const m = content.match(/IGX_SESSION=([^\n]+)/);
+    return m ? m[1].trim() : null;
+  } catch { return null; }
+}
+
+function saveSessionId(sessionId) {
+  let content = readEnvRaw();
+  content = content.replace(/IGX_SESSION=[^\n]*\n?/g, '');
+  if (sessionId && sessionId.trim()) content += `IGX_SESSION=${sessionId.trim()}\n`;
+  writeEnvRaw(content);
 }
 
 // ─── Validate key against backend ────────────────────────────────────────────
@@ -81,24 +102,6 @@ function getPlan()  { return _cachedPlan || 'free'; }
 function setPlan(p) { _cachedPlan = p; }
 
 module.exports = { readApiKey, saveApiKey, removeApiKey, validateKey, checkLicense, isPro, getPlan, setPlan, ENV_FILE, readSessionId, saveSessionId };
-
-// ─── Session ID (saved for all plans) ────────────────────────────────────────
-function readSessionId() {
-  try {
-    if (!fs.existsSync(ENV_FILE)) return null;
-    const m = fs.readFileSync(ENV_FILE, 'utf8').match(/IGX_SESSION=([^\n]+)/);
-    return m ? m[1].trim() : null;
-  } catch { return null; }
-}
-
-function saveSessionId(sessionId) {
-  try {
-    let content = fs.existsSync(ENV_FILE) ? fs.readFileSync(ENV_FILE, 'utf8') : '';
-    content = content.replace(/IGX_SESSION=[^\n]*\n?/g, '');
-    if (sessionId && sessionId.trim()) content += `IGX_SESSION=${sessionId.trim()}\n`;
-    fs.writeFileSync(ENV_FILE, content, { mode: 0o600 });
-  } catch {}
-}
 
 module.exports.readSessionId = readSessionId;
 module.exports.saveSessionId = saveSessionId;

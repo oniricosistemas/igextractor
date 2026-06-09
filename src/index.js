@@ -89,25 +89,56 @@ async function run() {
       options.sessionId = sessionIdArg.startsWith('--session-id=') 
         ? sessionIdArg.split('=')[1] 
         : args[args.indexOf(sessionIdArg) + 1];
+      if (!options.sessionId || options.sessionId.startsWith('-')) {
+        ui.err('Missing value for --session-id');
+        process.exit(1);
+      }
     } else {
       // Auto-read from .igextractor.env if not provided via CLI
       options.sessionId = license.readSessionId() || process.env.IGX_SESSION || process.env.IG_SESSION_ID || '';
     }
 
-    const limitArg = args.find(a => a === '--download-limit');
-    if (limitArg) options.downloadLimit = parseInt(args[args.indexOf(limitArg) + 1], 10);
+    // Safe value extraction utility for CLI flags
+    const getArgValue = (flag) => {
+      const idx = args.indexOf(flag);
+      if (idx === -1) return undefined;
+      const val = args[idx + 1];
+      return (val && !val.startsWith('-')) ? val : undefined;
+    };
+
+    const limitArg = args.find(a => a.startsWith('--download-limit=') || a === '--download-limit');
+    if (limitArg) {
+      const val = limitArg.startsWith('--download-limit=')
+        ? parseInt(limitArg.split('=')[1], 10)
+        : parseInt(getArgValue('--download-limit'), 10);
+      if (!isNaN(val) && val > 0) options.downloadLimit = val;
+      else ui.warn(`Invalid --download-limit value, using default.`);
+    }
     const scanLimitArg = args.find(a => a.startsWith('--scan-limit=') || a === '--scan-limit');
-    if (scanLimitArg) options.scanLimit = scanLimitArg.startsWith('--scan-limit=')
-      ? parseInt(scanLimitArg.split('=')[1], 10)
-      : parseInt(args[args.indexOf(scanLimitArg) + 1], 10);
+    if (scanLimitArg) {
+      const val = scanLimitArg.startsWith('--scan-limit=')
+        ? parseInt(scanLimitArg.split('=')[1], 10)
+        : parseInt(getArgValue('--scan-limit'), 10);
+      if (!isNaN(val) && val > 0) options.scanLimit = val;
+      else ui.warn(`Invalid --scan-limit value, using default.`);
+    }
 
     const maxAgeArg = args.find(a => a.startsWith('--max-age-days=') || a === '--max-age-days');
-    if (maxAgeArg) options.maxAgeDays = maxAgeArg.startsWith('--max-age-days=')
-      ? parseInt(maxAgeArg.split('=')[1], 10)
-      : parseInt(args[args.indexOf(maxAgeArg) + 1], 10);
+    if (maxAgeArg) {
+      const val = maxAgeArg.startsWith('--max-age-days=')
+        ? parseInt(maxAgeArg.split('=')[1], 10)
+        : parseInt(getArgValue('--max-age-days'), 10);
+      if (!isNaN(val) && val > 0) options.maxAgeDays = val;
+      else ui.warn(`Invalid --max-age-days value, using default.`);
+    }
 
-    const dirArg = args.find(a => a === '--output-dir');
-    if (dirArg) options.outputDir = args[args.indexOf(dirArg) + 1];
+    const dirArg = args.find(a => a.startsWith('--output-dir=') || a === '--output-dir');
+    if (dirArg) {
+      options.outputDir = dirArg.startsWith('--output-dir=')
+        ? dirArg.split('=')[1]
+        : getArgValue('--output-dir');
+      if (!options.outputDir) ui.warn(`Missing value for --output-dir, using default.`);
+    }
 
     if (args.includes('--strict-grid')) options.strictGrid = true;
     const strictGridModeArg = args.find(a => a.startsWith('--strict-grid-mode='));
@@ -182,14 +213,10 @@ async function run() {
   try {
     const axios = require('axios');
     const API_BASE = process.env.IGX_API_URL || 'https://igextractor-backend.onrender.com';
-    const ora = require('ora');
-    const spinner = ora({ text: t('wakingServer') || 'Connecting to license server...', spinner: 'dots' }).start();
+    ui.dim(t('wakingServer'));
     try {
       await axios.get(API_BASE + '/health', { timeout: 12000 });
-      spinner.stop();
-    } catch {
-      spinner.stop();
-    }
+    } catch {}
   } catch {}
 
   // ── License check (non-blocking) ─────────────────────────────────────────────

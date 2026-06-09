@@ -1,5 +1,9 @@
 'use strict';
 
+const fs   = require('fs');
+const path = require('path');
+const ENV  = path.join(process.env.HOME || process.env.USERPROFILE || '.', '.igextractor.env');
+
 const STRINGS = {
   en: {
     checkingLicense:     'Checking license...',
@@ -394,22 +398,17 @@ function t(key, ...args) {
 }
 
 function loadSavedLang() {
-  const fs   = require('fs');
-  const path = require('path');
-  const ENV  = path.join(process.env.HOME || process.env.USERPROFILE || '.', '.igextractor.env');
   try {
     if (!fs.existsSync(ENV)) return null;
-    const m = fs.readFileSync(ENV, 'utf8').match(/IGX_LANG=([a-z]{2})/);
+    const content = fs.readFileSync(ENV, 'utf8').replace(/^\uFEFF/, '');
+    const m = content.match(/IGX_LANG=([a-z]{2})/);
     return m ? m[1] : null;
   } catch { return null; }
 }
 
 function saveLang(lang) {
-  const fs   = require('fs');
-  const path = require('path');
-  const ENV  = path.join(process.env.HOME || process.env.USERPROFILE || '.', '.igextractor.env');
   try {
-    let content = fs.existsSync(ENV) ? fs.readFileSync(ENV, 'utf8') : '';
+    let content = fs.existsSync(ENV) ? fs.readFileSync(ENV, 'utf8').replace(/^\uFEFF/, '') : '';
     content = content.replace(/IGX_LANG=[^\n]*\n?/g, '');
     content += `IGX_LANG=${lang}\n`;
     fs.writeFileSync(ENV, content, { mode: 0o600 });

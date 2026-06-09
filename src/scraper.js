@@ -8,6 +8,63 @@ const { isPro, readSessionId, saveSessionId } = require('./license');
 const { t }          = require('./i18n');
 const { dbg }        = require('./debug');
 
+// Utility to parse Instagram's number formats (e.g., "1.2M", "7,890", "1.200" in EU)
+function parseNum(s) {
+  if (!s) return 0;
+  s = s.trim();
+  const m = s.match(/^([\d.,]+)\s*([KMBkmb]?)$/);
+  if (!m) return 0;
+  let numStr = m[1];
+  const suffix = m[2].toLowerCase();
+  if (suffix) {
+    numStr = numStr.replace(/[.,](?=\d{3}$)/, '');
+    numStr = numStr.replace(/,/g, '');
+  } else {
+    numStr = numStr.replace(/[.,](?=\d{3})/g, '');
+    numStr = numStr.replace(/,/g, '.');
+  }
+  const n = parseFloat(numStr) || 0;
+  const mult = { k: 1e3, m: 1e6, b: 1e9 }[suffix] || 1;
+  return Math.round(n * mult);
+}
+
+function deepFindUser(obj, targetUsername) {
+  if (!obj || typeof obj !== 'object') return null;
+  if (obj.username && (obj.pk || obj.id)) {
+    if (String(obj.username).toLowerCase() === String(targetUsername).toLowerCase()) return obj;
+  }
+  for (const key in obj) {
+    try {
+      const val = obj[key];
+      if (val && typeof val === 'object') {
+        const found = deepFindUser(val, targetUsername);
+        if (found) return found;
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+
+function extractMedia(obj, result) {
+  if (!obj || typeof obj !== 'object') return;
+  if (!obj.carousel_parent_id && (obj.shortcode || obj.code || (obj.pk && obj.edge_media_to_caption) || (obj.pk && obj.media_type && obj.taken_at))) {
+    const code = getPostCode(obj);
+    if (code) {
+      if (!result.posts.some(p => getPostCode(p) === code)) {
+        dbg('[capture] CAPTURED POST OBJECT:', JSON.stringify(obj).substring(0, 300) + '...');
+        result.posts.push(obj);
+      }
+    }
+  }
+  for (const key in obj) {
+    try {
+      const val = obj[key];
+      if (val && typeof val === 'object') extractMedia(val, result);
+    } catch (e) {}
+  }
+}
+
+
 let _debugBase = null;
 
 const FREE_LIMIT  = 10;
@@ -73,7 +130,7 @@ function _walkForChrome(dir, depth) {
   return undefined;
 }
 
-async function launchBrowser(headless = 'new') {
+async function launchBrowser(headless = true) {
   if (_browser) return;
   const puppeteer = require('puppeteer');
 
@@ -179,6 +236,14 @@ async function closeBrowser() {
   } catch {}
 }
 
+// Clean up Chrome on process exit to prevent zombie processes
+process.on('exit', () => {
+  if (_browser) {
+    try { _browser.close(); } catch (e) {}
+    _browser = null; _page = null;
+  }
+});
+
 function getPostCode(node) {
   return node.code || node.shortcode || node.pk || node.id || null;
 }
@@ -219,10 +284,6 @@ function isReel(node) {
   if (node.video_versions && node.video_versions.length) return true;
   if (node.is_video) return true;
   return false;
-}
-
-function isPhoto(node) {
-  return !isReel(node);
 }
 
 function getVideoUrl(node) {
@@ -453,7 +514,7 @@ async function fetchPostsFromGraphql(userId, limit = 50, options = {}, exampleUr
   }
 
   const qp = Object.fromEntries(parsed.searchParams.entries());
-  const query_hash = qp.query_hash || qp.query_hash || qp.query_id || qp.query_id || null;
+  const query_hash = qp.query_hash || qp.query_id || null;
   let variables = null;
   if (qp.variables) {
     try { variables = JSON.parse(qp.variables); } catch (e) { variables = null; }
@@ -562,23 +623,6 @@ async function navigateAndCapture(username, options = {}) {
         }
       } catch (e) {}
 
-      function deepFindUser(obj, targetUsername) {
-        if (!obj || typeof obj !== 'object') return null;
-        if (obj.username && (obj.pk || obj.id)) {
-          if (String(obj.username).toLowerCase() === String(targetUsername).toLowerCase()) return obj;
-        }
-        for (const key in obj) {
-          try {
-            const val = obj[key];
-            if (val && typeof val === 'object') {
-              const found = deepFindUser(val, targetUsername);
-              if (found) return found;
-            }
-          } catch (e) {}
-        }
-        return null;
-      }
-
       const foundUser = deepFindUser(json, username);
       if (foundUser) {
         const foundCount = (foundUser.follower_count || (foundUser.edge_followed_by && foundUser.edge_followed_by.count) || 0);
@@ -590,32 +634,16 @@ async function navigateAndCapture(username, options = {}) {
         }
       }
 
-      function extractMedia(obj) {
-        if (!obj || typeof obj !== 'object') return;
-        if (!obj.carousel_parent_id && (obj.shortcode || obj.code || (obj.pk && obj.edge_media_to_caption) || (obj.pk && obj.media_type && obj.taken_at))) {
-          const code = getPostCode(obj);
-          if (code) {
-            if (!result.posts.some(p => getPostCode(p) === code)) {
-              dbg('[capture] CAPTURED POST OBJECT:', JSON.stringify(obj).substring(0, 300) + '...');
-              result.posts.push(obj);
-            }
-          }
-        }
-        for (const key in obj) {
-          try {
-            if (obj[key] && typeof obj[key] === 'object') extractMedia(obj[key]);
-          } catch (e) {}
-        }
-      }
-      extractMedia(json);
+      extractMedia(json, result);
     } catch (err) {
       // swallow
     }
   };
 
   page.on('response', handler);
+  let reqFinishedHandler = null;
   if (options && options.debug) {
-    page.on('requestfinished', async (request) => {
+    reqFinishedHandler = async (request) => {
       try {
         const reqUrl = request.url();
         const method = request.method();
@@ -624,12 +652,15 @@ async function navigateAndCapture(username, options = {}) {
         const safeName = `request_${(reqUrl && reqUrl.replace(/[^a-z0-9_\-\.]/gi, '_').slice(0,120))}_${Date.now()}.json`;
         await saveDebugFile('network', safeName, { url: reqUrl, method, headers, postData }).catch(() => {});
       } catch (e) {}
-    });
+    };
+    page.on('requestfinished', reqFinishedHandler);
   }
 
-  console.error('[DEBUG] navigateAndCapture: goto', username);
   try {
-    await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
+    console.error('[DEBUG] navigateAndCapture: goto', username);
+    await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 }).catch(async (gotoErr) => {
+      console.error('[DEBUG] goto failed:', gotoErr.message);
+    });
     console.error('[DEBUG] goto1 url:', page.url().substring(0, 80));
     // If redirected away from profile (bot detection), wait longer and retry once
     if (!page.url().includes(`/${username}`)) {
@@ -638,63 +669,59 @@ async function navigateAndCapture(username, options = {}) {
       await page.goto(`${IG_BASE}/${username}/`, { waitUntil: 'domcontentloaded', timeout: 35000 });
       console.error('[DEBUG] goto2 url:', page.url().substring(0, 80));
     }
-  } catch (gotoErr) {
-    console.error('[DEBUG] goto failed:', gotoErr.message);
-  }
-  // Give JS/XHR a moment to fire after DOM is ready
-  await sleep(3000);
+    // Give JS/XHR a moment to fire after DOM is ready
+    await sleep(3000);
 
-  // Skip login-redirect check if we reached the profile page
-  const finalUrl = page.url();
-  if (!finalUrl.includes(`/${username}`)) {
-  try {
-    const loginRedirect = await page.evaluate(() => {
-      const url = location.href;
-      const title = document.title;
-      const html = document.documentElement.innerHTML;
-      const isLoginUrl = url.includes('/accounts/login');
-      const isLoginTitle = title === 'Log in • Instagram' || title === 'Instagram - Log in';
-      const hasLoginForm = document.querySelector('form input[name="username"]') !== null;
-      return (isLoginUrl || isLoginTitle || hasLoginForm) ? { url, title, html } : null;
-    });
-
-    if (loginRedirect && options.debug) {
-      dbg('[capture] LOGIN REDIRECT DETECTED');
-      const timestamp = Date.now();
-      await saveDebugFile('dom_payloads', `login_redirect_${username}_${timestamp}.html`, loginRedirect.html);
-      await saveDebugFile('dom_payloads', `login_redirect_${username}_${timestamp}.json`, { url: loginRedirect.url, title: loginRedirect.title });
-    }
-
-    if (loginRedirect) {
-      throw new Error('login-redirect');
-    }
-  } catch (e) {
-    if (e.message === 'login-redirect') throw e;
-    dbg('[capture][login-detect] error:', e.message);
-  }
-  }
-
-  const start = Date.now();
-  const timeoutMs = 25000; 
-  let lastScroll = 0;
-  
-  while ((Date.now() - start) < timeoutMs) {
-    const elapsed = Date.now() - start;
-    if (elapsed - lastScroll >= 3000) {
+    // Skip login-redirect check if we reached the profile page
+    if (!page.url().includes(`/${username}`)) {
       try {
-        await page.evaluate(() => window.scrollBy(0, 1200));
-        dbg('[capture] scrolling to force feed load...');
-      } catch (e) {}
-      lastScroll = elapsed;
+        const loginRedirect = await page.evaluate(() => {
+          const url = location.href;
+          const title = document.title;
+          const html = document.documentElement.innerHTML;
+          const isLoginUrl = url.includes('/accounts/login');
+          const isLoginTitle = title === 'Log in • Instagram' || title === 'Instagram - Log in';
+          const hasLoginForm = document.querySelector('form input[name="username"]') !== null;
+          return (isLoginUrl || isLoginTitle || hasLoginForm) ? { url, title, html } : null;
+        });
+        if (loginRedirect && options.debug) {
+          dbg('[capture] LOGIN REDIRECT DETECTED');
+          const timestamp = Date.now();
+          await saveDebugFile('dom_payloads', `login_redirect_${username}_${timestamp}.html`, loginRedirect.html);
+          await saveDebugFile('dom_payloads', `login_redirect_${username}_${timestamp}.json`, { url: loginRedirect.url, title: loginRedirect.title });
+        }
+        if (loginRedirect) {
+          throw new Error('login-redirect');
+        }
+      } catch (e) {
+        if (e.message === 'login-redirect') throw e;
+        dbg('[capture][login-detect] error:', e.message);
+      }
     }
-    if (result.user && result.posts.length >= 10) {
-      dbg('[capture] sufficient posts captured, stopping scroll.');
-      break;
+
+    const start = Date.now();
+    const timeoutMs = 25000; 
+    let lastScroll = 0;
+
+    while ((Date.now() - start) < timeoutMs) {
+      const elapsed = Date.now() - start;
+      if (elapsed - lastScroll >= 3000) {
+        try {
+          await page.evaluate(() => window.scrollBy(0, 1200));
+          dbg('[capture] scrolling to force feed load...');
+        } catch (e) {}
+        lastScroll = elapsed;
+      }
+      if (result.user && result.posts.length >= 10) {
+        dbg('[capture] sufficient posts captured, stopping scroll.');
+        break;
+      }
+      await sleep(500);
     }
-    await sleep(500);
-  }
-  
+  } finally {
     page.off('response', handler);
+    if (reqFinishedHandler) page.off('requestfinished', reqFinishedHandler);
+  }
 
     if (result.gridShortcodes.length < 6) {
       dbg('[capture] Grid shortcodes empty or below threshold (6), trying DOM extraction...');
@@ -803,24 +830,6 @@ async function navigateAndCapture(username, options = {}) {
       const ogTitle = ogTitleMatch ? ogTitleMatch[1] : null;
       const ogImage = ogImageMatch ? ogImageMatch[1] : null;
 
-      const parseNum = s => {
-        s = s.trim();
-        const m = s.match(/^([\d.,]+)\s*([KMBkmb]?)$/);
-        if (!m) return 0;
-        let numStr = m[1];
-        const suffix = m[2].toLowerCase();
-        if (suffix) {
-          numStr = numStr.replace(/[.,](?=\d{3}$)/, '');
-          numStr = numStr.replace(/,/g, '');
-        } else {
-          numStr = numStr.replace(/[.,](?=\d{3})/g, '');
-          numStr = numStr.replace(/,/g, '.');
-        }
-        const n = parseFloat(numStr) || 0;
-        const mult = { k: 1e3, m: 1e6, b: 1e9 }[suffix] || 1;
-        return Math.round(n * mult);
-      };
-
       const content = ogDesc || '';
       const followers = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Followers?|seguidores)/i);
       const following = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Following|seguidos)/i);
@@ -886,7 +895,6 @@ async function navigateAndCapture(username, options = {}) {
           const nm = ogData.title.match(/^(.+?)\s*\(@/);
           if (nm) full_name = nm[1].trim();
         }
-        const parseNum = s => { /* same as above */ s = s.trim(); const m = s.match(/^([\d.,]+)\s*([KMBkmb]?)$/); if (!m) return 0; let ns = m[1]; const sf = m[2].toLowerCase(); if (sf) { ns = ns.replace(/[.,](?=\d{3}$)/, ''); ns = ns.replace(/,/g, ''); } else { ns = ns.replace(/[.,](?=\d{3})/g, ''); ns = ns.replace(/,/g, '.'); } const n = parseFloat(ns) || 0; const mult = { k: 1e3, m: 1e6, b: 1e9 }[sf] || 1; return Math.round(n * mult); };
         const content = ogData.desc || '';
         const ff = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Followers?|seguidores)/i);
         const fg = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Following|seguidos)/i);
@@ -1028,18 +1036,33 @@ async function normalizeProfile(u) {
 async function downloadFile(url, dest) {
   const page = await getPage();
   try {
-    const buffer = await page.evaluate(async (url) => {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const blob = await response.blob();
-      const reader = new FileReader();
-      return new Promise((resolve, reject) => {
-        reader.onloadend = () => resolve(Array.from(new Uint8Array(reader.result)));
-        reader.onerror = reject;
-        reader.readAsArrayBuffer(blob);
-      });
-    }, url);
-    fs.writeFileSync(dest, Buffer.from(buffer));
+    // Pass URL via window to keep page.evaluate signature clean (pkg-friendly)
+    await page.evaluate(`window.__igx_dl_url = ${JSON.stringify(url)};`);
+    const base64Data = await page.evaluate(`
+      (async () => {
+        try {
+          const resp = await fetch(window.__igx_dl_url);
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          const blob = await resp.blob();
+          return await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              // result is a data URL: "data:<mime>;base64,<data>"
+              const result = reader.result || '';
+              const idx = result.indexOf(',');
+              resolve(idx >= 0 ? result.substring(idx + 1) : result);
+            };
+            reader.onerror = () => reject(new Error('FileReader error'));
+            reader.readAsDataURL(blob);
+          });
+        } catch (e) { return { __error: e.message }; }
+      })()
+    `);
+    if (base64Data && typeof base64Data === 'string') {
+      fs.writeFileSync(dest, Buffer.from(base64Data, 'base64'));
+    } else {
+      throw new Error((base64Data && base64Data.__error) || 'Empty response');
+    }
   } catch (e) {
     dbg('[download] Failed to download via Puppeteer-Fetch:', url, e.message);
     try {
@@ -1059,7 +1082,10 @@ async function downloadFile(url, dest) {
 }
 
 async function fetchProfileOnly(username, options) {
-  _sessionId = decodeURIComponent((options && options.sessionId) || '');
+  // Wrap in try/catch to prevent crash on malformed percent-encoding
+  _sessionId = (() => {
+    try { return decodeURIComponent((options && options.sessionId) || ''); } catch (e) { return (options && options.sessionId) || ''; }
+  })();
   const spinner = ui.createSpinner(t('spinLaunching'));
   spinner.start();
   try {
@@ -1077,7 +1103,7 @@ async function fetchProfileOnly(username, options) {
 async function extractProfile(username, options = {}) {
   options.username = username;
   const pro = isPro();
-  _sessionId = decodeURIComponent(options.sessionId || process.env.IG_SESSION_ID || '');
+  _sessionId = (() => { try { return decodeURIComponent(options.sessionId || process.env.IG_SESSION_ID || ''); } catch (e) { return options.sessionId || process.env.IG_SESSION_ID || ''; } })();
   dbg('[extractProfile] _sessionId length:', _sessionId.length, 'options.sessionId length:', (options.sessionId||'').length);
   
   const planMax      = pro ? Infinity : FREE_LIMIT;
@@ -1220,8 +1246,8 @@ async function extractProfile(username, options = {}) {
     const summary = {};
     let imageMap  = {};
     
-    const wantPhotos = options.photos === true || options.photos !== false && !options.reels;
-    const wantReels  = options.reels  === true;
+    const wantPhotos = options.photos ?? !options.reels;
+    const wantReels  = options.reels  ?? !options.photos;
     if (wantPhotos || wantReels) {
       const result = await runMediaDownload(outputDir, allPosts, effectiveMax, wantPhotos, wantReels, pro, gridShortcodes, domShortcodes, { 
         ...options, 
@@ -1386,7 +1412,8 @@ async function runMediaDownload(outputDir, allPosts, limit, wantPhotos, wantReel
   const scanLimit = options.scanLimit || 500;
   
   const totalTarget = (wantPhotos ? photoLimit : 0) + (wantReels ? reelLimit : 0);
-  const barTotal = totalTarget === Infinity ? filtered.length : Math.min(filtered.length, totalTarget);
+  // Track inspected items for progress (stops bar from stalling on skipped posts)
+  const barLimit = Math.min(filtered.length, scanLimit === Infinity ? filtered.length : scanLimit);
   const bar = ui.createProgressBar(wantReels && !wantPhotos ? t('storyLabel') : t('imageLabel'), 'brand');
   
   const mediaMap = [];
@@ -1511,7 +1538,7 @@ async function runMediaDownload(outputDir, allPosts, limit, wantPhotos, wantReel
       }
       if (bar && typeof bar.tick === 'function') {
         const done = (wantPhotos ? result.photos : 0) + (wantReels ? result.reels : 0);
-        bar.tick(done, barTotal);
+        bar.tick(done, barLimit);
       }
     }
   };
@@ -1655,22 +1682,21 @@ async function handleManualLogin() {
       _sessionId = newSessionId;
       saveSessionId(_sessionId);
     } else if (result.data && result.data.require_login) {
-      ui.err('El sessionid fue rechazado por Instagram (require_login: true). Probá con uno más reciente.');
+      ui.err('El sessionid fue rechazado por Instagram (require_login: true). No se guarda. Probá con uno más reciente.');
+      // NO save - poisoned session would overwrite a good one
     } else {
-      ui.err(`No se pudo validar (status: ${result.status}). Igual lo guardamos, probá de nuevo.`);
-      _sessionId = newSessionId;
-      saveSessionId(_sessionId);
+      ui.err(`No se pudo validar (status: ${result.status}). No se guarda. Probá de nuevo.`);
+      // NO save - don't overwrite a possibly valid session with garbage
     }
   } catch (e) {
     dbg('[Auth] validation error:', e.message);
-    // Even on error, save it - better to try with the new sessionid than keep the old one
-    ui.warn('Error validando: ' + e.message + ' - guardando igual...');
-    _sessionId = newSessionId;
-    saveSessionId(_sessionId);
+    ui.err('Error validando: ' + e.message + ' - no se guardó el sessionid.');
+    // NO save - don't overwrite on connection errors either
   }
 }
 
-async function browserFetchJson(url) {
+async function browserFetchJson(url, _retryCount = 0) {
+  const MAX_RETRIES = 1;
   const page = await getPage();
 
   // Quick inject sessionid cookie
@@ -1720,10 +1746,14 @@ async function browserFetchJson(url) {
   if (json && (json.__error === 401 || json.require_login === true || json.__error === 'JSON_PARSE_FAIL')) {
     const isLoginPage = json.__body && json.__body.includes('accounts/login');
     if (json.__error === 401 || json.require_login === true || isLoginPage) {
+        if (_retryCount >= MAX_RETRIES) {
+          dbg('[Auth] Max retries reached. Aborting fetch.');
+          return { __error: 'MAX_RETRIES_EXCEEDED', __body: json.__body };
+        }
         dbg('[Auth] Session invalid detected via API. Triggering manual login.');
         await handleManualLogin();
-        // Retry the fetch once after login
-        return await browserFetchJson(url); 
+        // Retry the fetch once after login using a loop instead of recursion to prevent stack overflow
+        return await browserFetchJson(url, _retryCount + 1); 
     }
   }
 
@@ -1765,6 +1795,14 @@ async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) 
         const json = await browserFetchJson(endpoint);
         if (!json || json.__error) {
           dbg('[comments] API error:', json && json.__error);
+          if (json && json.__error === 429 && attempt < 2) {
+            // Rate limited — wait with backoff and retry
+            attempt++;
+            const delay = attempt * 5000;
+            dbg('[comments] 429 rate limit, retrying after', delay, 'ms');
+            await sleep(delay);
+            continue;
+          }
           if (json && (json.__error === 401 || json.require_login === true) && attempt === 0) {
             attempt++;
             await sleep(3000);
@@ -1919,7 +1957,7 @@ async function runFollowersDownload(outputDir, profileData) {
       hasMore   = json.big_list || (json.next_max_id != null);
       nextMaxId = json.next_max_id || null;
       if (!nextMaxId) hasMore = false;
-      if (bar && typeof bar.tick === 'function') bar.tick(results.length, results.length + (hasMore ? 1 : 0));
+      if (bar && typeof bar.tick === 'function') bar.tick(results.length, 5000);
       if (hasMore) await sleep(1500);
     }
   } catch (e) {
@@ -1957,7 +1995,7 @@ async function runFollowingDownload(outputDir, profileData) {
       hasMore   = json.big_list || (json.next_max_id != null);
       nextMaxId = json.next_max_id || null;
       if (!nextMaxId) hasMore = false;
-      if (bar && typeof bar.tick === 'function') bar.tick(results.length, results.length + (hasMore ? 1 : 0));
+      if (bar && typeof bar.tick === 'function') bar.tick(results.length, 5000);
       if (hasMore) await sleep(1500);
     }
   } catch (e) {

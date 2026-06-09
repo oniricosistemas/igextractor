@@ -9,9 +9,9 @@
   "scripts": {
     "start": "node bin/igextractor.js",
     "build": "node scripts/build.js",
-    "build:win": "pkg bin/igextractor.js --targets node18-win-x64 --output dist/igextractor-win.exe --config pkg.config.json",
-    "build:mac": "pkg bin/igextractor.js --targets node18-macos-x64 --output dist/igextractor-macos --config pkg.config.json",
-    "build:linux": "pkg bin/igextractor.js --targets node18-linux-x64 --output dist/igextractor-linux --config pkg.config.json"
+    "build:win": "pkg bin/igextractor.js --targets node18-win-x64 --output dist/igextractor-win.exe",
+    "build:mac": "pkg bin/igextractor.js --targets node18-macos-x64 --output dist/igextractor-macos",
+    "build:linux": "pkg bin/igextractor.js --targets node18-linux-x64 --output dist/igextractor-linux"
   },
   "pkg": {
     "scripts": [
@@ -34,13 +34,11 @@
     "axios": "^1.6.0",
     "chalk": "^4.1.2",
     "cli-progress": "^3.12.0",
-    "dotenv": "^16.3.1",
     "figlet": "^1.7.0",
     "inquirer": "^8.2.6",
     "boxen": "^5.1.2",
     "gradient-string": "^2.0.2",
     "cli-table3": "^0.6.3",
-    "ora": "^5.4.1",
     "puppeteer": "^22.0.0"
   },
   "devDependencies": {

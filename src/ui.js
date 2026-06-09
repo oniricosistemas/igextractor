@@ -44,7 +44,8 @@ function printLogo() {
   const indented = art.split('\n').map(line => '    ' + line).join('\n');
   console.log('\n' + igGradient(indented));
 
-  const tagline = '  Instagram Data Extraction Tool  v0.5  ';
+  const pkg = require('../package.json');
+  const tagline = `  Instagram Data Extraction Tool  v${pkg.version}  `;
   const pad = 18;
   console.log(
     '    ' + C.dim('─'.repeat(pad)) +
