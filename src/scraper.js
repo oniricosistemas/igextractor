@@ -415,22 +415,24 @@ async function fetchProfileFromApi(username) {
       await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
     }
 
-    const json = await page.evaluate(async (url) => {
-      try {
-        const r = await fetch(url, {
-          headers: {
-            'X-IG-App-ID': '936619743392459',
-            'X-Requested-With': 'XMLHttpRequest',
-            'Accept': '*/*',
-          },
-          credentials: 'include',
-        });
-        if (!r.ok) return { error: r.status };
-        return await r.json();
-      } catch (err) {
-        return { error: err.message };
-      }
-    }, apiUrl);
+    const json = await page.evaluate(new Function('url', `
+      return (async () => {
+        try {
+          const r = await fetch(url, {
+            headers: {
+              'X-IG-App-ID': '936619743392459',
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': '*/*',
+            },
+            credentials: 'include',
+          });
+          if (!r.ok) return { error: r.status };
+          return await r.json();
+        } catch (err) {
+          return { error: err.message };
+        }
+      })();
+    `), apiUrl);
     if (json && !json.error) {
       dbg('[profileApi] browser fetch response keys:', Object.keys(json).join(', '));
       const user = (json.data && json.data.user) || json.user || null;
@@ -464,25 +466,29 @@ async function buildPostsFromShortcodes(shortcodes = [], limit = 50, options = {
       const apiInfoUrl = `${IG_BASE}/api/v1/media/${code}/info/`;
       dbg('[rebuild] trying API info fetch for', code, apiInfoUrl);
       try {
-        json = await page.evaluate(async (url) => {
-          const r = await fetch(url, { 
-            credentials: 'include', 
-            headers: { 'X-IG-App-ID': '936619743392459' }
-          });
-          if (!r.ok) return null;
-          return await r.json();
-        }, apiInfoUrl);
+        json = await page.evaluate(new Function('url', `
+          return (async () => {
+            const r = await fetch(url, { 
+              credentials: 'include', 
+              headers: { 'X-IG-App-ID': '936619743392459' }
+            });
+            if (!r.ok) return null;
+            return await r.json();
+          })();
+        `), apiInfoUrl);
       } catch (e) { dbg('[rebuild] API info fetch error:', e.message); }
 
       if (!json) {
         const pUrl = `${IG_BASE}/p/${code}/?__a=1&__d=dis`;
         dbg('[rebuild] trying /p/ fallback for', code, pUrl);
         try {
-          json = await page.evaluate(async (url) => {
-            const r = await fetch(url, { credentials: 'include' });
-            if (!r.ok) return null;
-            return await r.json();
-          }, pUrl);
+          json = await page.evaluate(new Function('url', `
+            return (async () => {
+              const r = await fetch(url, { credentials: 'include' });
+              if (!r.ok) return null;
+              return await r.json();
+            })();
+          `), pUrl);
         } catch (e) { dbg('[rebuild] /p/ fallback error:', e.message); }
       }
 
@@ -490,11 +496,13 @@ async function buildPostsFromShortcodes(shortcodes = [], limit = 50, options = {
         const reelUrl = `${IG_BASE}/reel/${code}/?__a=1&__d=dis`;
         dbg('[rebuild] trying /reel/ fallback for', code, reelUrl);
         try {
-          json = await page.evaluate(async (url) => {
-            const r = await fetch(url, { credentials: 'include' });
-            if (!r.ok) return null;
-            return await r.json();
-          }, reelUrl);
+          json = await page.evaluate(new Function('url', `
+            return (async () => {
+              const r = await fetch(url, { credentials: 'include' });
+              if (!r.ok) return null;
+              return await r.json();
+            })();
+          `), reelUrl);
         } catch (e) { dbg('[rebuild] /reel/ fallback error:', e.message); }
       }
 
@@ -704,7 +712,7 @@ async function navigateAndCapture(username, options = {}) {
     // Skip login-redirect check if we reached the profile page
     if (!page.url().includes(`/${username}`)) {
       try {
-        const loginRedirect = await page.evaluate(() => {
+        const loginRedirect = await page.evaluate(new Function(`
           const url = location.href;
           const title = document.title;
           const html = document.documentElement.innerHTML;
@@ -712,7 +720,7 @@ async function navigateAndCapture(username, options = {}) {
           const isLoginTitle = title === 'Log in • Instagram' || title === 'Instagram - Log in';
           const hasLoginForm = document.querySelector('form input[name="username"]') !== null;
           return (isLoginUrl || isLoginTitle || hasLoginForm) ? { url, title, html } : null;
-        });
+        `));
         if (loginRedirect && options.debug) {
           dbg('[capture] LOGIN REDIRECT DETECTED');
           const timestamp = Date.now();
@@ -736,7 +744,7 @@ async function navigateAndCapture(username, options = {}) {
       const elapsed = Date.now() - start;
       if (elapsed - lastScroll >= 3000) {
         try {
-          await page.evaluate(() => window.scrollBy(0, 1200));
+          await page.evaluate('window.scrollBy(0, 1200)');
           dbg('[capture] scrolling to force feed load...');
         } catch (e) {}
         lastScroll = elapsed;
@@ -755,20 +763,20 @@ async function navigateAndCapture(username, options = {}) {
     if (result.gridShortcodes.length < 6) {
       dbg('[capture] Grid shortcodes empty or below threshold (6), trying DOM extraction...');
       try {
-        const domCodes = await page.evaluate(() => {
+        const domCodes = await page.evaluate(new Function(`
           const codes = new Set();
           const links = Array.from(document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]'));
-          links.forEach(a => {
+          links.forEach(function(a) {
             const href = a.getAttribute('href') || '';
-            const match = href.match(/\/(p|reel)\/([^\/?#]+)/);
+            const match = href.match(/\\/(p|reel)\\/([^\\/?#]+)/);
             if (match && match[2]) codes.add(match[2]);
           });
-          document.querySelectorAll('[data-shortcode]').forEach(el => {
+          document.querySelectorAll('[data-shortcode]').forEach(function(el) {
             const code = el.getAttribute('data-shortcode');
             if (code) codes.add(code);
           });
           return Array.from(codes);
-        });
+        `));
         if (domCodes.length > 0) {
           result.domShortcodes = domCodes;
           dbg('[capture] DOM extraction found', domCodes.length, 'shortcodes');
@@ -784,7 +792,7 @@ async function navigateAndCapture(username, options = {}) {
   if (!result.user) {
     try {
       dbg('[capture] attempting script/JSON embedded fallback');
-      const scriptUser = await page.evaluate((targetUsername) => {
+      const scriptUser = await page.evaluate(new Function('targetUsername', `
         function deepFind(obj, uname) {
           if (!obj || typeof obj !== 'object') return null;
           if (obj.username && (obj.pk || obj.id) &&
@@ -817,7 +825,7 @@ async function navigateAndCapture(username, options = {}) {
         for (const s of allScripts) {
           const txt = s.textContent || '';
           if (!txt.includes(targetUsername)) continue;
-          const matches = txt.match(/\{[^{}]{0,5000}"username"\s*:\s*"[^"]+"/g) || [];
+          const matches = txt.match(/\\{[^{}]{0,5000}"username"\\s*:\\s*"[^"]+"/g) || [];
           for (const m of matches) {
             try {
               const startIdx = txt.indexOf(m);
@@ -834,7 +842,7 @@ async function navigateAndCapture(username, options = {}) {
           }
         }
         return null;
-      }, username).catch(() => null);
+      `), username).catch(() => null);
 
       if (scriptUser) {
         dbg('[capture] script fallback FOUND user:', scriptUser.username);
@@ -906,7 +914,7 @@ async function navigateAndCapture(username, options = {}) {
   if (result.user && !result.user.follower_count) {
     try {
       await page.waitForSelector('meta[property="og:description"]', { timeout: 15000 }).catch(() => {});
-      const ogData = await page.evaluate(() => {
+      const ogData = await page.evaluate(new Function(`
         const desc  = document.querySelector('meta[property="og:description"]');
         const title = document.querySelector('meta[property="og:title"]');
         const image = document.querySelector('meta[property="og:image"]');
@@ -915,7 +923,7 @@ async function navigateAndCapture(username, options = {}) {
           title: title ? title.getAttribute('content') : null,
           image: image ? image.getAttribute('content') : null,
         };
-      });
+      `));
       dbg('[capture] evaluate og:description:', ogData.desc ? ogData.desc.substring(0, 80) : 'NOT FOUND');
       if (ogData.desc) {
         // full_name from og:title
@@ -942,17 +950,19 @@ async function navigateAndCapture(username, options = {}) {
   // ── Layer 3: fetch user info directly via browser API (bypass 429) ──
   if (result.user && !result.user.follower_count && result.user.pk) {
     try {
-      const apiData = await page.evaluate(async (pk) => {
-        try {
-          const res = await fetch('https://www.instagram.com/api/v1/users/' + pk + '/info/', {
-            credentials: 'include',
-            headers: { 'X-IG-App-ID': '936619743392459', 'User-Agent': navigator.userAgent },
-          });
-          if (!res.ok) return null;
-          const json = await res.json();
-          return json.user || json;
-        } catch (e) { return null; }
-      }, result.user.pk);
+      const apiData = await page.evaluate(new Function('pk', `
+        return (async () => {
+          try {
+            const res = await fetch('https://www.instagram.com/api/v1/users/' + pk + '/info/', {
+              credentials: 'include',
+              headers: { 'X-IG-App-ID': '936619743392459', 'User-Agent': navigator.userAgent },
+            });
+            if (!res.ok) return null;
+            const json = await res.json();
+            return json.user || json;
+          } catch (e) { return null; }
+        })();
+      `), result.user.pk);
       if (apiData && (apiData.follower_count || apiData.following_count || apiData.media_count)) {
         dbg('[capture] api fill: followers:', apiData.follower_count, 'following:', apiData.following_count, 'posts:', apiData.media_count);
         if (apiData.follower_count)  result.user.follower_count  = apiData.follower_count;
@@ -972,17 +982,17 @@ async function navigateAndCapture(username, options = {}) {
   // ── Layer 4: try to extract user_id from page scripts if pk still missing ──
   if (!result.user || !result.user.pk) {
     try {
-      const scriptData = await page.evaluate(() => {
+      const scriptData = await page.evaluate(new Function(`
         const scripts = document.querySelectorAll('script:not([src])');
         for (const s of scripts) {
           const text = s.textContent || '';
           if (text.includes('"user_id"')) {
-            const match = text.match(/"user_id"\s*:\s*"(\d+)"/);
+            const match = text.match(/"user_id"\\s*:\\s*"(\\d+)"/);
             if (match) return match[1];
           }
         }
         return null;
-      });
+      `));
       if (scriptData) {
         if (result.user) { result.user.pk = scriptData; result.user.id = scriptData; }
         dbg('[capture] script pk extraction:', scriptData);
@@ -1032,7 +1042,7 @@ async function scrollForMorePosts(existingPosts, limit) {
   page.on('response', handler);
   const scrolls = Math.min(Math.ceil(limit / 12), 20);
   for (let i = 0; i < scrolls && posts.length < limit; i++) {
-    await page.evaluate(() => window.scrollBy(0, 1500));
+    await page.evaluate('window.scrollBy(0, 1500)');
     await sleep(2500);
   }
   page.off('response', handler);
