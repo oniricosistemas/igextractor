@@ -412,8 +412,8 @@ document.querySelectorAll('a[href^="#"]').forEach(a => {
   });
 });
 
-// ── Pro request form ──────────────────────────────────────────────────────────
-const BACKEND = 'https://igextractor-backend.onrender.com';
+// ── Pro request form → Formspree (sends email to admin) ──────────────────────
+const FORMSPREE = 'https://formspree.io/f/xkoaznvo';
 
 document.getElementById('pro-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -427,17 +427,18 @@ document.getElementById('pro-form').addEventListener('submit', async (e) => {
   msg.className = 'mt-4 text-sm hidden';
 
   try {
-    const res  = await fetch(`${BACKEND}/pro-request`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ email }),
+    const res = await fetch(FORMSPREE, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        email,
+        _subject: 'nueva compra IGextractor',
+      }),
     });
-    const data = await res.json();
 
-    if (res.ok && data.success) {
-      const isDup = data.message && data.message.toLowerCase().includes('already');
-      msg.textContent = isDup ? s['form-dup'] : s['form-ok'];
-      msg.className = `mt-4 text-sm ${isDup ? 'text-[#888]' : 'text-[#3ecf8e]'}`;
+    if (res.ok) {
+      msg.textContent = s['form-ok'].replace('✓', '');
+      msg.className = 'mt-4 text-sm text-[#3ecf8e]';
       document.getElementById('pro-email').value = '';
     } else {
       msg.textContent = s['form-err'];
