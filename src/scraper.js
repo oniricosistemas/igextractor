@@ -791,45 +791,18 @@ async function navigateAndCapture(username, options = {}) {
     }
   }
 
-  // Fallback: build user from og: meta tags or inline script data
+  // ── Layer 1: Parse og:description from raw HTML (fast, no wait) ──────────
   try {
-    let ogDesc   = null;
-    let ogTitle  = null;
-    let ogImage  = null;
+    const rawHtml = await page.content();
+    const ogDescMatch  = rawHtml.match(/<meta\s+[^>]*property=["']og:description["'][^>]*content=["']([^"']*)["']/i);
+    const ogTitleMatch = rawHtml.match(/<meta\s+[^>]*property=["']og:title["'][^>]*content=["']([^"']*)["']/i);
+    const ogImageMatch = rawHtml.match(/<meta\s+[^>]*property=["']og:image["'][^>]*content=["']([^"']*)["']/i);
+    dbg('[capture] raw html og:description:', ogDescMatch ? ogDescMatch[1].substring(0, 80) : 'NOT FOUND');
+    if (ogDescMatch || ogTitleMatch) {
+      const ogDesc  = ogDescMatch  ? ogDescMatch[1]  : null;
+      const ogTitle = ogTitleMatch ? ogTitleMatch[1] : null;
+      const ogImage = ogImageMatch ? ogImageMatch[1] : null;
 
-    // Try meta tags first (wait up to 10s for JS-rendered page)
-    try {
-      await page.waitForSelector('meta[property="og:description"]', { timeout: 10000 });
-    } catch {}
-    const ogData = await page.evaluate(() => {
-      const desc  = document.querySelector('meta[property="og:description"]');
-      const title = document.querySelector('meta[property="og:title"]');
-      const image = document.querySelector('meta[property="og:image"]');
-      return {
-        desc: desc ? desc.getAttribute('content') : null,
-        title: title ? title.getAttribute('content') : null,
-        image: image ? image.getAttribute('content') : null,
-        htmlTitle: document.title,
-        pageUrl: location.href,
-      };
-    });
-
-    ogDesc  = ogData.desc;
-    ogTitle = ogData.title;
-    ogImage = ogData.image;
-
-    // If no og:description, try extracting from JSON-LD script or og:title
-    if (!ogDesc && ogData.htmlTitle) {
-      const titleMatch = ogData.htmlTitle.match(/^(.*?)\s*\(@/);
-      if (titleMatch) {
-        // The og:title format is "Full Name (@username) • Instagram photos and videos"
-        // Fallback: extract full_name only
-        ogTitle = ogData.htmlTitle;
-      }
-    }
-
-    dbg('[capture] ogData url:', ogData.pageUrl, 'desc:', ogDesc ? ogDesc.substring(0, 80) : null);
-    if (ogDesc || ogTitle) {
       const parseNum = s => {
         s = s.trim();
         const m = s.match(/^([\d.,]+)\s*([KMBkmb]?)$/);
@@ -859,7 +832,6 @@ async function navigateAndCapture(username, options = {}) {
         media_count:     posts     ? parseNum(posts[1])     : 0,
       };
 
-      // Extract full_name from og:title or document.title
       let full_name = '';
       if (ogTitle) {
         const nameMatch = ogTitle.match(/^(.+?)\s*\(@/);
@@ -867,7 +839,7 @@ async function navigateAndCapture(username, options = {}) {
       }
 
       if (!result.user) {
-        dbg('[capture] og fallback: building minimal user from meta tags');
+        dbg('[capture] raw html: building minimal user from meta tags');
         result.user = {
           username:    username,
           full_name:   full_name,
@@ -879,39 +851,104 @@ async function navigateAndCapture(username, options = {}) {
         };
       }
 
-      // ALWAYS fill counters if metaCounts has them — this overwrites partial zeros from early interceptors
       if (metaCounts.follower_count || metaCounts.following_count || metaCounts.media_count) {
-        dbg('[capture] og fallback counts:', metaCounts, '| current follower_count:', result.user.follower_count);
+        dbg('[capture] raw html og counts:', metaCounts, '| current follower_count:', result.user.follower_count);
         if (metaCounts.follower_count)  result.user.follower_count  = metaCounts.follower_count;
         if (metaCounts.following_count) result.user.following_count = metaCounts.following_count;
         if (metaCounts.media_count)     result.user.media_count     = metaCounts.media_count;
         if (!result.user.full_name && full_name) result.user.full_name = full_name;
-        dbg('[capture] after og fill: follower_count:', result.user.follower_count);
+        dbg('[capture] after raw html fill: follower_count:', result.user.follower_count);
       }
     }
   } catch (e) {
-    dbg('[capture] og fallback failed:', e && e.message);
+    dbg('[capture] raw html og parse failed:', e.message);
   }
 
-  // Last resort: try to extract user_id from page scripts (Instagram embeds it)
+  // ── Layer 2: try page.evaluate (wait for DOM render) if we still have no counters ──
+  if (result.user && !result.user.follower_count) {
+    try {
+      await page.waitForSelector('meta[property="og:description"]', { timeout: 15000 }).catch(() => {});
+      const ogData = await page.evaluate(() => {
+        const desc  = document.querySelector('meta[property="og:description"]');
+        const title = document.querySelector('meta[property="og:title"]');
+        const image = document.querySelector('meta[property="og:image"]');
+        return {
+          desc:  desc  ? desc.getAttribute('content')  : null,
+          title: title ? title.getAttribute('content') : null,
+          image: image ? image.getAttribute('content') : null,
+        };
+      });
+      dbg('[capture] evaluate og:description:', ogData.desc ? ogData.desc.substring(0, 80) : 'NOT FOUND');
+      if (ogData.desc) {
+        // full_name from og:title
+        let full_name = '';
+        if (ogData.title) {
+          const nm = ogData.title.match(/^(.+?)\s*\(@/);
+          if (nm) full_name = nm[1].trim();
+        }
+        const parseNum = s => { /* same as above */ s = s.trim(); const m = s.match(/^([\d.,]+)\s*([KMBkmb]?)$/); if (!m) return 0; let ns = m[1]; const sf = m[2].toLowerCase(); if (sf) { ns = ns.replace(/[.,](?=\d{3}$)/, ''); ns = ns.replace(/,/g, ''); } else { ns = ns.replace(/[.,](?=\d{3})/g, ''); ns = ns.replace(/,/g, '.'); } const n = parseFloat(ns) || 0; const mult = { k: 1e3, m: 1e6, b: 1e9 }[sf] || 1; return Math.round(n * mult); };
+        const content = ogData.desc || '';
+        const ff = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Followers?|seguidores)/i);
+        const fg = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Following|seguidos)/i);
+        const pp = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Posts?|publicaciones)/i);
+        if (ff) result.user.follower_count  = parseNum(ff[1]);
+        if (fg) result.user.following_count = parseNum(fg[1]);
+        if (pp) result.user.media_count     = parseNum(pp[1]);
+        if (!result.user.full_name && full_name) result.user.full_name = full_name;
+        dbg('[capture] evaluate fill: follower_count:', result.user.follower_count);
+      }
+    } catch (e) {
+      dbg('[capture] evaluate og fallback failed:', e.message);
+    }
+  }
+
+  // ── Layer 3: fetch user info directly via browser API (bypass 429) ──
+  if (result.user && !result.user.follower_count && result.user.pk) {
+    try {
+      const apiData = await page.evaluate(async (pk) => {
+        try {
+          const res = await fetch('https://www.instagram.com/api/v1/users/' + pk + '/info/', {
+            credentials: 'include',
+            headers: { 'X-IG-App-ID': '936619743392459', 'User-Agent': navigator.userAgent },
+          });
+          if (!res.ok) return null;
+          const json = await res.json();
+          return json.user || json;
+        } catch (e) { return null; }
+      }, result.user.pk);
+      if (apiData && (apiData.follower_count || apiData.following_count || apiData.media_count)) {
+        dbg('[capture] api fill: followers:', apiData.follower_count, 'following:', apiData.following_count, 'posts:', apiData.media_count);
+        if (apiData.follower_count)  result.user.follower_count  = apiData.follower_count;
+        if (apiData.following_count) result.user.following_count = apiData.following_count;
+        if (apiData.media_count)     result.user.media_count     = apiData.media_count;
+        if (!result.user.full_name && apiData.full_name) result.user.full_name = apiData.full_name;
+        if (!result.user.profile_pic_url && apiData.profile_pic_url) result.user.profile_pic_url = apiData.profile_pic_url;
+        dbg('[capture] after api fill: follower_count:', result.user.follower_count);
+      } else {
+        dbg('[capture] api fill returned no counters (pk:', result.user.pk, ')');
+      }
+    } catch (e) {
+      dbg('[capture] api fill failed:', e.message);
+    }
+  }
+
+  // ── Layer 4: try to extract user_id from page scripts if pk still missing ──
   if (!result.user || !result.user.pk) {
     try {
       const scriptData = await page.evaluate(() => {
-        const scripts = document.querySelectorAll('script[type="text/javascript"]');
+        const scripts = document.querySelectorAll('script:not([src])');
         for (const s of scripts) {
           const text = s.textContent || '';
-          if (text.includes('window.__INITIAL_STATE__')) {
-            const match = text.match(/window\.__INITIAL_STATE__\s*=\s*({.*?});/);
-            if (match) return match[1].substring(0, 5000);
+          if (text.includes('"user_id"')) {
+            const match = text.match(/"user_id"\s*:\s*"(\d+)"/);
+            if (match) return match[1];
           }
         }
         return null;
       });
       if (scriptData) {
-        const uidMatch = scriptData.match(/"user_id"\s*:\s*"(\d+)"/);
-        if (uidMatch && uidMatch[1]) {
-          if (result.user) { result.user.pk = uidMatch[1]; result.user.id = uidMatch[1]; }
-        }
+        if (result.user) { result.user.pk = scriptData; result.user.id = scriptData; }
+        dbg('[capture] script pk extraction:', scriptData);
       }
     } catch (e) {
       dbg('[capture] script pk extraction failed:', e.message);
