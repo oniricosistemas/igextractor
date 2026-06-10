@@ -1012,10 +1012,8 @@ async function scrollForMorePosts(existingPosts, limit) {
   const seen  = new Set(posts.map(p => getPostCode(p)).filter(Boolean));
 
   const handler = async (response) => {
-    const url = response.url();
-    // Accept broad range of Instagram API endpoints
-    if (!url.includes('graphql') && !url.includes('/api/v1/feed/') && !url.includes('xdt_api')) return;
     try {
+      // No URL filter — match navigateAndCapture pattern: accept all JSON 200 responses
       if (response.status() !== 200) return;
       const ct = response.headers()['content-type'] || '';
       if (!ct.includes('json')) return;
