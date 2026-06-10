@@ -1013,14 +1013,15 @@ async function scrollForMorePosts(existingPosts, limit) {
 
   const handler = async (response) => {
     const url = response.url();
-    // Accept both legacy GraphQL and modern Instagram API feed endpoints
-    if (!url.includes('graphql') && !url.includes('xdt_api__v1__feed')) return;
+    // Accept broad range of Instagram API endpoints
+    if (!url.includes('graphql') && !url.includes('api/v1/') && !url.includes('xdt_api')) return;
     try {
       const ct = response.headers()['content-type'] || '';
       if (!ct.includes('json')) return;
       const json = await response.json().catch(() => null);
       if (!json) return;
 
+      // Modern GraphQL endpoint (xdt_api__v1__feed__user_timeline_graphql_connection)
       const newFeed = json.data && json.data.xdt_api__v1__feed__user_timeline_graphql_connection;
       if (newFeed && newFeed.edges) {
         newFeed.edges.forEach(e => {
@@ -1028,6 +1029,7 @@ async function scrollForMorePosts(existingPosts, limit) {
           if (code && !seen.has(code)) { seen.add(code); posts.push(e.node); }
         });
       }
+      // Legacy GraphQL format (via /graphql/query/)
       const oldEdges = json.data && json.data.user &&
                         json.data.user.edge_owner_to_timeline_media &&
                         json.data.user.edge_owner_to_timeline_media.edges;
@@ -1037,15 +1039,61 @@ async function scrollForMorePosts(existingPosts, limit) {
           if (code && !seen.has(code)) { seen.add(code); posts.push(e.node); }
         });
       }
+      // REST API format (items array, from api/v1/feed/ user endpoint)
+      if (json.items && Array.isArray(json.items) && json.items.length > 0) {
+        json.items.forEach(item => {
+          const code = getPostCode(item);
+          if (code && !seen.has(code)) { seen.add(code); posts.push(item); }
+        });
+      }
+      // Direct edges array at response root level (some endpoints)
+      if (json.edges && Array.isArray(json.edges)) {
+        json.edges.forEach(e => {
+          const node = e.node || e;
+          const code = getPostCode(node);
+          if (code && !seen.has(code)) { seen.add(code); posts.push(node); }
+        });
+      }
     } catch {}
   };
 
   page.on('response', handler);
-  // Increase max scrolls to handle profiles with 1000+ posts
-  const scrolls = Math.min(Math.ceil(limit / 12), 100);
-  for (let i = 0; i < scrolls && posts.length < limit; i++) {
-    await page.evaluate('window.scrollBy(0, 1500)');
+
+  const maxScrolls = Math.min(Math.ceil(limit / 12), 100);
+  const maxTimeMs  = 120_000; // hard timeout: 2 minutes
+  const startTime  = Date.now();
+  let staleCount   = 0;       // consecutive scrolls with 0 new posts
+  let prevCount    = posts.length;
+
+  for (let i = 0; i < maxScrolls && posts.length < limit; i++) {
+    // Check hard timeout
+    if (Date.now() - startTime > maxTimeMs) {
+      dbg('[scroll] max time reached', maxTimeMs / 1000, 'sec, stopping early');
+      break;
+    }
+
+    await page.evaluate('window.scrollBy(0, 1500)').catch(e => {
+      dbg('[scroll] scroll evaluate failed:', e.message);
+    });
     await sleep(2500);
+
+    // Early exit: if no new posts after several scrolls, page is exhausted
+    const added = posts.length - prevCount;
+    if (added === 0) {
+      staleCount++;
+      if (staleCount >= 5) {
+        dbg('[scroll] no new posts for 5 scrolls, stopping early');
+        break;
+      }
+    } else {
+      staleCount = 0; // reset on success
+    }
+    prevCount = posts.length;
+
+    // Progress log every 10 scrolls
+    if ((i + 1) % 10 === 0) {
+      dbg(`[scroll] progress: ${i + 1}/${maxScrolls} scrolls, ${posts.length} posts captured`);
+    }
   }
   page.off('response', handler);
 
@@ -1309,33 +1357,39 @@ async function extractProfile(username, options = {}) {
     }
     
     if (!rebuiltFromShortcodes && allPosts.length < Math.min(effectiveMax === Infinity ? Math.min(totalKnown || 2000, 2000) : effectiveMax, totalKnown)) {
-      const spin2 = ui.createSpinner(t('spinScrolling'));
-      spin2.start();
-      const scrollLimit = effectiveMax === Infinity ? Math.min(totalKnown || 2000, 2000) : effectiveMax;
-      const scrollResult = await scrollForMorePosts(allPosts, scrollLimit);
-      // Extract DOM shortcodes from scroll fallback BEFORE losing them in .filter()
-      const scrollDomShortcodes = Array.isArray(scrollResult._domShortcodes) ? scrollResult._domShortcodes : [];
-      delete scrollResult._domShortcodes;
-      allPosts = scrollResult;
-      spin2.stop(null);
+      let spin2 = null;
+      try {
+        spin2 = ui.createSpinner(t('spinScrolling'));
+        spin2.start();
+        const scrollLimit = effectiveMax === Infinity ? Math.min(totalKnown || 2000, 2000) : effectiveMax;
+        const scrollResult = await scrollForMorePosts(allPosts, scrollLimit);
+        // Extract DOM shortcodes from scroll fallback BEFORE losing them in .filter()
+        const scrollDomShortcodes = Array.isArray(scrollResult._domShortcodes) ? scrollResult._domShortcodes : [];
+        delete scrollResult._domShortcodes;
+        allPosts = scrollResult;
+        if (spin2) spin2.stop(null);
 
-      // If scroll captured more shortcodes from DOM than post objects, rebuild missing posts
-      if (scrollDomShortcodes.length > allPosts.length) {
-        dbg('[extractProfile] scroll fallback found', scrollDomShortcodes.length, 'shortcodes in DOM, rebuilding...');
-        try {
-          const rebuilt = await buildPostsFromShortcodes(scrollDomShortcodes, Math.min(scrollDomShortcodes.length, effectiveMax === Infinity ? scrollDomShortcodes.length : effectiveMax), options);
-          if (rebuilt && rebuilt.length > allPosts.length) {
-            const seenCodes = new Set(allPosts.map(p => getPostCode(p)).filter(Boolean));
-            for (const p of rebuilt) {
-              const code = getPostCode(p);
-              if (code && !seenCodes.has(code)) {
-                seenCodes.add(code);
-                allPosts.push(p);
+        // If scroll captured more shortcodes from DOM than post objects, rebuild missing posts
+        if (scrollDomShortcodes.length > allPosts.length) {
+          dbg('[extractProfile] scroll fallback found', scrollDomShortcodes.length, 'shortcodes in DOM, rebuilding...');
+          try {
+            const rebuilt = await buildPostsFromShortcodes(scrollDomShortcodes, Math.min(scrollDomShortcodes.length, effectiveMax === Infinity ? scrollDomShortcodes.length : effectiveMax), options);
+            if (rebuilt && rebuilt.length > allPosts.length) {
+              const seenCodes = new Set(allPosts.map(p => getPostCode(p)).filter(Boolean));
+              for (const p of rebuilt) {
+                const code = getPostCode(p);
+                if (code && !seenCodes.has(code)) {
+                  seenCodes.add(code);
+                  allPosts.push(p);
+                }
               }
+              dbg('[extractProfile] scroll DOM rebuild added', allPosts.length, 'total posts');
             }
-            dbg('[extractProfile] scroll DOM rebuild added', allPosts.length, 'total posts');
-          }
-        } catch (e) { dbg('[extractProfile] scroll DOM rebuild failed:', e && e.message); }
+          } catch (e) { dbg('[extractProfile] scroll DOM rebuild failed:', e && e.message); }
+        }
+      } catch (e) {
+        dbg('[extractProfile] scroll block failed:', e && e.message);
+        if (spin2) spin2.stop(null);
       }
     }
     
