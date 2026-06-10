@@ -1123,7 +1123,7 @@ async function scrollForMorePosts(existingPosts, limit) {
         posts._domShortcodes = unseenDomCodes;
       }
     } catch (e) {
-      dbg('[scroll] DOM fallback failed:', e.message);
+      dbg('[scroll] DOM fallback failed:', (e && e.message) || e);
     }
   }
 
