@@ -1014,8 +1014,9 @@ async function scrollForMorePosts(existingPosts, limit) {
   const handler = async (response) => {
     const url = response.url();
     // Accept broad range of Instagram API endpoints
-    if (!url.includes('graphql') && !url.includes('api/v1/') && !url.includes('xdt_api')) return;
+    if (!url.includes('graphql') && !url.includes('/api/v1/feed/') && !url.includes('xdt_api')) return;
     try {
+      if (response.status() !== 200) return;
       const ct = response.headers()['content-type'] || '';
       if (!ct.includes('json')) return;
       const json = await response.json().catch(() => null);
@@ -1046,10 +1047,11 @@ async function scrollForMorePosts(existingPosts, limit) {
           if (code && !seen.has(code)) { seen.add(code); posts.push(item); }
         });
       }
-      // Direct edges array at response root level (some endpoints)
+      // Direct edges array at response root level (some endpoints, requires .node)
       if (json.edges && Array.isArray(json.edges)) {
         json.edges.forEach(e => {
-          const node = e.node || e;
+          const node = e.node;
+          if (!node) return;
           const code = getPostCode(node);
           if (code && !seen.has(code)) { seen.add(code); posts.push(node); }
         });
@@ -1058,44 +1060,46 @@ async function scrollForMorePosts(existingPosts, limit) {
   };
 
   page.on('response', handler);
+  try {
+    const maxScrolls = Math.min(Math.ceil(limit / 12), 100);
+    const maxTimeMs  = 120_000; // hard timeout: 2 minutes
+    const startTime  = Date.now();
+    let staleCount   = 0;       // consecutive scrolls with 0 new posts
+    let prevCount    = posts.length;
 
-  const maxScrolls = Math.min(Math.ceil(limit / 12), 100);
-  const maxTimeMs  = 120_000; // hard timeout: 2 minutes
-  const startTime  = Date.now();
-  let staleCount   = 0;       // consecutive scrolls with 0 new posts
-  let prevCount    = posts.length;
-
-  for (let i = 0; i < maxScrolls && posts.length < limit; i++) {
-    // Check hard timeout
-    if (Date.now() - startTime > maxTimeMs) {
-      dbg('[scroll] max time reached', maxTimeMs / 1000, 'sec, stopping early');
-      break;
-    }
-
-    await page.evaluate('window.scrollBy(0, 1500)').catch(e => {
-      dbg('[scroll] scroll evaluate failed:', e.message);
-    });
-    await sleep(2500);
-
-    // Early exit: if no new posts after several scrolls, page is exhausted
-    const added = posts.length - prevCount;
-    if (added === 0) {
-      staleCount++;
-      if (staleCount >= 5) {
-        dbg('[scroll] no new posts for 5 scrolls, stopping early');
+    for (let i = 0; i < maxScrolls && posts.length < limit; i++) {
+      // Check hard timeout
+      if (Date.now() - startTime > maxTimeMs) {
+        dbg('[scroll] max time reached', maxTimeMs / 1000, 'sec, stopping early');
         break;
       }
-    } else {
-      staleCount = 0; // reset on success
-    }
-    prevCount = posts.length;
 
-    // Progress log every 10 scrolls
-    if ((i + 1) % 10 === 0) {
-      dbg(`[scroll] progress: ${i + 1}/${maxScrolls} scrolls, ${posts.length} posts captured`);
+      await page.evaluate('window.scrollBy(0, 1500)').catch(e => {
+        dbg('[scroll] scroll evaluate failed:', (e && e.message) || e);
+      });
+      await sleep(2500);
+
+      // Early exit: if no new posts after several scrolls, page is exhausted
+      const added = posts.length - prevCount;
+      if (added === 0) {
+        staleCount++;
+        if (staleCount >= 5) {
+          dbg('[scroll] no new posts for 5 scrolls, stopping early');
+          break;
+        }
+      } else {
+        staleCount = 0; // reset on success
+      }
+      prevCount = posts.length;
+
+      // Progress log every 10 scrolls
+      if ((i + 1) % 10 === 0) {
+        dbg(`[scroll] progress: ${i + 1}/${maxScrolls} scrolls, ${posts.length} posts captured`);
+      }
     }
+  } finally {
+    page.off('response', handler);
   }
-  page.off('response', handler);
 
   // Fallback: try to extract any remaining posts from DOM after scrolling
   if (posts.length < limit) {
@@ -1113,9 +1117,10 @@ async function scrollForMorePosts(existingPosts, limit) {
         });
         return Array.from(codes);
       });
-      dbg('[scroll] DOM fallback extracted', domCodes.length, 'additional shortcodes');
-      if (domCodes.length > posts.length) {
-        posts._domShortcodes = domCodes;
+      const unseenDomCodes = domCodes.filter(c => !seen.has(c));
+      dbg('[scroll] DOM fallback extracted', domCodes.length, 'shortcodes,', unseenDomCodes.length, 'unseen');
+      if (unseenDomCodes.length > 0) {
+        posts._domShortcodes = unseenDomCodes;
       }
     } catch (e) {
       dbg('[scroll] DOM fallback failed:', e.message);
