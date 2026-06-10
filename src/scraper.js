@@ -1024,7 +1024,7 @@ async function scrollForMorePosts(existingPosts, limit) {
 
       // Modern GraphQL endpoint (xdt_api__v1__feed__user_timeline_graphql_connection)
       const newFeed = json.data && json.data.xdt_api__v1__feed__user_timeline_graphql_connection;
-      if (newFeed && newFeed.edges) {
+      if (newFeed && newFeed.edges && newFeed.edges.length > 0) {
         knownMatched = true;
         newFeed.edges.forEach(e => {
           const code = e.node && getPostCode(e.node);
@@ -1035,7 +1035,7 @@ async function scrollForMorePosts(existingPosts, limit) {
       const oldEdges = json.data && json.data.user &&
                         json.data.user.edge_owner_to_timeline_media &&
                         json.data.user.edge_owner_to_timeline_media.edges;
-      if (oldEdges) {
+      if (oldEdges && oldEdges.length > 0) {
         knownMatched = true;
         oldEdges.forEach(e => {
           const code = e.node && getPostCode(e.node);
@@ -1051,7 +1051,7 @@ async function scrollForMorePosts(existingPosts, limit) {
         });
       }
       // Direct edges array at response root level (some endpoints, requires .node)
-      if (json.edges && Array.isArray(json.edges)) {
+      if (json.edges && Array.isArray(json.edges) && json.edges.length > 0) {
         knownMatched = true;
         json.edges.forEach(e => {
           const node = e.node;
@@ -1068,8 +1068,13 @@ async function scrollForMorePosts(existingPosts, limit) {
         try {
           (function walk(obj) {
             if (!obj || typeof obj !== 'object') return;
-            // Skip arrays — individual elements are handled by known patterns above
-            if (Array.isArray(obj)) return;
+            // Iterate array elements (for..in yields numeric indices for arrays)
+            if (Array.isArray(obj)) {
+              for (let i = 0; i < obj.length; i++) {
+                try { if (obj[i] && typeof obj[i] === 'object') walk(obj[i]); } catch (e) {}
+              }
+              return;
+            }
             if (!obj.carousel_parent_id && (obj.shortcode || obj.code || (obj.pk && obj.edge_media_to_caption) || (obj.pk && obj.media_type && obj.taken_at))) {
               const code = getPostCode(obj);
               if (code && !seen.has(code)) { seen.add(code); posts.push(obj); }
