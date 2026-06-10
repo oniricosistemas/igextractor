@@ -1054,7 +1054,23 @@ async function scrollForMorePosts(existingPosts, limit) {
           if (code && !seen.has(code)) { seen.add(code); posts.push(node); }
         });
       }
-    } catch {}
+
+      // Recursive fallback: walk entire JSON tree for post-like nodes
+      // Matches extractMedia() approach used in navigateAndCapture
+      try {
+        (function walk(obj) {
+          if (!obj || typeof obj !== 'object') return;
+          if (!obj.carousel_parent_id && (obj.shortcode || obj.code || (obj.pk && obj.edge_media_to_caption) || (obj.pk && obj.media_type && obj.taken_at))) {
+            const code = getPostCode(obj);
+            if (code && !seen.has(code)) { seen.add(code); posts.push(obj); }
+            // Don't return — there may be nested posts (carousel children)
+          }
+          for (const k of Object.keys(obj)) {
+            try { if (obj[k] && typeof obj[k] === 'object') walk(obj[k]); } catch (e) {}
+          }
+        })(json);
+      } catch (e) { dbg('[scroll] recursive walk failed:', (e && e.message) || e); }
+    } catch (e) { dbg('[scroll] handler error:', (e && e.message) || e); }
   };
 
   page.on('response', handler);
