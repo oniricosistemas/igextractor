@@ -1020,9 +1020,12 @@ async function scrollForMorePosts(existingPosts, limit) {
       const json = await response.json().catch(() => null);
       if (!json) return;
 
+      let knownMatched = false;
+
       // Modern GraphQL endpoint (xdt_api__v1__feed__user_timeline_graphql_connection)
       const newFeed = json.data && json.data.xdt_api__v1__feed__user_timeline_graphql_connection;
       if (newFeed && newFeed.edges) {
+        knownMatched = true;
         newFeed.edges.forEach(e => {
           const code = e.node && getPostCode(e.node);
           if (code && !seen.has(code)) { seen.add(code); posts.push(e.node); }
@@ -1033,6 +1036,7 @@ async function scrollForMorePosts(existingPosts, limit) {
                         json.data.user.edge_owner_to_timeline_media &&
                         json.data.user.edge_owner_to_timeline_media.edges;
       if (oldEdges) {
+        knownMatched = true;
         oldEdges.forEach(e => {
           const code = e.node && getPostCode(e.node);
           if (code && !seen.has(code)) { seen.add(code); posts.push(e.node); }
@@ -1040,6 +1044,7 @@ async function scrollForMorePosts(existingPosts, limit) {
       }
       // REST API format (items array, from api/v1/feed/ user endpoint)
       if (json.items && Array.isArray(json.items) && json.items.length > 0) {
+        knownMatched = true;
         json.items.forEach(item => {
           const code = getPostCode(item);
           if (code && !seen.has(code)) { seen.add(code); posts.push(item); }
@@ -1047,6 +1052,7 @@ async function scrollForMorePosts(existingPosts, limit) {
       }
       // Direct edges array at response root level (some endpoints, requires .node)
       if (json.edges && Array.isArray(json.edges)) {
+        knownMatched = true;
         json.edges.forEach(e => {
           const node = e.node;
           if (!node) return;
@@ -1055,21 +1061,26 @@ async function scrollForMorePosts(existingPosts, limit) {
         });
       }
 
-      // Recursive fallback: walk entire JSON tree for post-like nodes
-      // Matches extractMedia() approach used in navigateAndCapture
-      try {
-        (function walk(obj) {
-          if (!obj || typeof obj !== 'object') return;
-          if (!obj.carousel_parent_id && (obj.shortcode || obj.code || (obj.pk && obj.edge_media_to_caption) || (obj.pk && obj.media_type && obj.taken_at))) {
-            const code = getPostCode(obj);
-            if (code && !seen.has(code)) { seen.add(code); posts.push(obj); }
-            // Don't return — there may be nested posts (carousel children)
-          }
-          for (const k of Object.keys(obj)) {
-            try { if (obj[k] && typeof obj[k] === 'object') walk(obj[k]); } catch (e) {}
-          }
-        })(json);
-      } catch (e) { dbg('[scroll] recursive walk failed:', (e && e.message) || e); }
+      // Recursive fallback: walk entire JSON tree for post-like nodes.
+      // Only runs when none of the 4 known patterns matched this response.
+      // Mirrors extractMedia() approach used in navigateAndCapture.
+      if (!knownMatched) {
+        try {
+          (function walk(obj) {
+            if (!obj || typeof obj !== 'object') return;
+            // Skip arrays — individual elements are handled by known patterns above
+            if (Array.isArray(obj)) return;
+            if (!obj.carousel_parent_id && (obj.shortcode || obj.code || (obj.pk && obj.edge_media_to_caption) || (obj.pk && obj.media_type && obj.taken_at))) {
+              const code = getPostCode(obj);
+              if (code && !seen.has(code)) { seen.add(code); posts.push(obj); }
+              // Don't return — sibling post objects may appear deeper in the tree
+            }
+            for (const k in obj) {
+              try { if (obj[k] && typeof obj[k] === 'object') walk(obj[k]); } catch (e) {}
+            }
+          })(json);
+        } catch (e) { dbg('[scroll] recursive walk failed:', (e && e.message) || e); }
+      }
     } catch (e) { dbg('[scroll] handler error:', (e && e.message) || e); }
   };
 
