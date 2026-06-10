@@ -1013,7 +1013,8 @@ async function scrollForMorePosts(existingPosts, limit) {
 
   const handler = async (response) => {
     const url = response.url();
-    if (!url.includes('graphql')) return;
+    // Accept both legacy GraphQL and modern Instagram API feed endpoints
+    if (!url.includes('graphql') && !url.includes('xdt_api__v1__feed')) return;
     try {
       const ct = response.headers()['content-type'] || '';
       if (!ct.includes('json')) return;
@@ -1040,12 +1041,39 @@ async function scrollForMorePosts(existingPosts, limit) {
   };
 
   page.on('response', handler);
-  const scrolls = Math.min(Math.ceil(limit / 12), 20);
+  // Increase max scrolls to handle profiles with 1000+ posts
+  const scrolls = Math.min(Math.ceil(limit / 12), 100);
   for (let i = 0; i < scrolls && posts.length < limit; i++) {
     await page.evaluate('window.scrollBy(0, 1500)');
     await sleep(2500);
   }
   page.off('response', handler);
+
+  // Fallback: try to extract any remaining posts from DOM after scrolling
+  if (posts.length < limit) {
+    try {
+      const domCodes = await page.evaluate(() => {
+        const codes = new Set();
+        document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]').forEach(a => {
+          const href = a.getAttribute('href') || '';
+          const match = href.match(/\/(p|reel)\/([^\/?#]+)/);
+          if (match && match[2]) codes.add(match[2]);
+        });
+        document.querySelectorAll('[data-shortcode]').forEach(el => {
+          const code = el.getAttribute('data-shortcode');
+          if (code) codes.add(code);
+        });
+        return Array.from(codes);
+      });
+      dbg('[scroll] DOM fallback extracted', domCodes.length, 'additional shortcodes');
+      if (domCodes.length > posts.length) {
+        posts._domShortcodes = domCodes;
+      }
+    } catch (e) {
+      dbg('[scroll] DOM fallback failed:', e.message);
+    }
+  }
+
   return posts;
 }
 
@@ -1280,11 +1308,35 @@ async function extractProfile(username, options = {}) {
       }
     }
     
-    if (!rebuiltFromShortcodes && allPosts.length < Math.min(effectiveMax === Infinity ? 500 : effectiveMax, totalKnown)) {
+    if (!rebuiltFromShortcodes && allPosts.length < Math.min(effectiveMax === Infinity ? Math.min(totalKnown || 2000, 2000) : effectiveMax, totalKnown)) {
       const spin2 = ui.createSpinner(t('spinScrolling'));
       spin2.start();
-      allPosts = await scrollForMorePosts(allPosts, effectiveMax === Infinity ? 500 : effectiveMax);
+      const scrollLimit = effectiveMax === Infinity ? Math.min(totalKnown || 2000, 2000) : effectiveMax;
+      const scrollResult = await scrollForMorePosts(allPosts, scrollLimit);
+      // Extract DOM shortcodes from scroll fallback BEFORE losing them in .filter()
+      const scrollDomShortcodes = Array.isArray(scrollResult._domShortcodes) ? scrollResult._domShortcodes : [];
+      delete scrollResult._domShortcodes;
+      allPosts = scrollResult;
       spin2.stop(null);
+
+      // If scroll captured more shortcodes from DOM than post objects, rebuild missing posts
+      if (scrollDomShortcodes.length > allPosts.length) {
+        dbg('[extractProfile] scroll fallback found', scrollDomShortcodes.length, 'shortcodes in DOM, rebuilding...');
+        try {
+          const rebuilt = await buildPostsFromShortcodes(scrollDomShortcodes, Math.min(scrollDomShortcodes.length, effectiveMax === Infinity ? scrollDomShortcodes.length : effectiveMax), options);
+          if (rebuilt && rebuilt.length > allPosts.length) {
+            const seenCodes = new Set(allPosts.map(p => getPostCode(p)).filter(Boolean));
+            for (const p of rebuilt) {
+              const code = getPostCode(p);
+              if (code && !seenCodes.has(code)) {
+                seenCodes.add(code);
+                allPosts.push(p);
+              }
+            }
+            dbg('[extractProfile] scroll DOM rebuild added', allPosts.length, 'total posts');
+          }
+        } catch (e) { dbg('[extractProfile] scroll DOM rebuild failed:', e && e.message); }
+      }
     }
     
     const seen = new Set();
