@@ -295,12 +295,25 @@ function getPostTimestamp(node) {
     const cap = n.edge_media_to_caption.edges[0] && n.edge_media_to_caption.edges[0].node;
     if (cap && cap.taken_at) candidates.push(cap.taken_at);
   }
-
   for (const c of candidates) {
     const v = pick(c);
     if (v && v > 0) return v;
   }
   return 0;
+}
+
+function formatTs(ts, formatType) {
+  if (!ts || ts <= 0) return '';
+  const d = new Date(ts * 1000);
+  const pad = n => String(n).padStart(2, '0');
+  const Y = d.getUTCFullYear();
+  const M = pad(d.getUTCMonth() + 1);
+  const D = pad(d.getUTCDate());
+  const h = pad(d.getUTCHours());
+  const m = pad(d.getUTCMinutes());
+  const s = pad(d.getUTCSeconds());
+  if (formatType === 'file') return `${Y}-${M}-${D}_${h}-${m}-${s}`;
+  return `${Y}-${M}-${D} ${h}:${m}:${s}`;
 }
 
 function isReel(node) {
