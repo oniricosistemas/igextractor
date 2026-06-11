@@ -744,7 +744,20 @@ async function navigateAndCapture(username, options = {}) {
       const elapsed = Date.now() - start;
       if (elapsed - lastScroll >= 3000) {
         try {
-          await page.evaluate('window.scrollBy(0, 1200)');
+          // Scroll ALL containers to bottom activa el lazy load de Instagram
+          await page.evaluate(() => {
+            const scrollToBottom = (el) => { el.scrollTop = el.scrollHeight; };
+            scrollToBottom(window);
+            if (document.scrollingElement) scrollToBottom(document.scrollingElement);
+            document.querySelectorAll('[role="feed"], main, article, [role="presentation"]').forEach(el => { if (el.scrollHeight > el.clientHeight) scrollToBottom(el); });
+            document.querySelectorAll('*').forEach(el => {
+              try {
+                const s = window.getComputedStyle(el);
+                if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 50) scrollToBottom(el);
+              } catch(e) {}
+            });
+          });
+          try { await page.keyboard.press('End'); } catch(e) {}
           dbg('[capture] scrolling to force feed load...');
         } catch (e) {}
         lastScroll = elapsed;
@@ -1006,10 +1019,11 @@ async function navigateAndCapture(username, options = {}) {
   return result;
 }
 
-async function scrollForMorePosts(existingPosts, limit) {
+async function scrollForMorePosts(existingPosts, limit, progressSpin) {
   const page  = await getPage(); // Primary path: Browser required for this operation
   const posts = [...existingPosts];
   const seen  = new Set(posts.map(p => getPostCode(p)).filter(Boolean));
+  const imgSeen = new Set(); // shortcodes del DOM para detectar carga aunque no llegue API
 
   const handler = async (response) => {
     try {
@@ -1104,57 +1118,99 @@ async function scrollForMorePosts(existingPosts, limit) {
         break;
       }
 
-      await page.evaluate('window.scrollBy(0, 1500)').catch(e => {
-        dbg('[scroll] scroll evaluate failed:', (e && e.message) || e);
-      });
-      await sleep(2500);
+      // Scroll ALL containers to bottom: Instagram virtual scroller solo carga al llegar al fondo
+      await page.evaluate(() => {
+        const scrollToBottom = (el) => { el.scrollTop = el.scrollHeight; };
+        scrollToBottom(window);
+        if (document.scrollingElement) scrollToBottom(document.scrollingElement);
+        document.querySelectorAll('[role="feed"], main, article, [role="presentation"]').forEach(el => { if (el.scrollHeight > el.clientHeight) scrollToBottom(el); });
+        // Also try ALL overflow-auto elements (covers unrecognized Instagram containers)
+        document.querySelectorAll('*').forEach(el => {
+          try {
+            const s = window.getComputedStyle(el);
+            if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 50) scrollToBottom(el);
+          } catch(e) {}
+        });
+      }).catch(e => { dbg('[scroll] scroll evaluate failed:', (e && e.message) || e); });
+      // Also press End key as native trigger for lazy load
+      try { await page.keyboard.press('End'); } catch(e) { dbg('[scroll] keyboard End failed:', e && e.message); }
+      await sleep(3500);
 
-      // Early exit: if no new posts after several scrolls, page is exhausted
-      const added = posts.length - prevCount;
+      // Diagnostic: qué contenedores hay y su estado
+      if (i === 0) {
+        try {
+          const diag = await page.evaluate(() => {
+            const containers = [];
+            document.querySelectorAll('[role="feed"], main, article, [role="presentation"], *').forEach(el => {
+              try {
+                const s = window.getComputedStyle(el);
+                const oh = el.scrollHeight, ch = el.clientHeight;
+                if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && oh > ch + 50) {
+                  containers.push({ tag: el.tagName, id: el.id, cls: (el.className || '').slice(0,40), scrollH: oh, clientH: ch, scrollTop: el.scrollTop });
+                }
+              } catch(e) {}
+            });
+            return containers.slice(0, 5);
+          });
+          dbg('[scroll] scrollable containers:', JSON.stringify(diag));
+        } catch(e) { dbg('[scroll] diag failed:', e && e.message); }
+      }
+
+      // Extract DOM shortcodes para detectar carga aunque no lleguen API responses
+      let domAdded = 0;
+      try {
+        const domCodes = await page.evaluate(() => {
+          const codes = new Set();
+          document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]').forEach(a => {
+            const m = (a.getAttribute('href') || '').match(/\/(p|reel)\/([^\/?#]+)/);
+            if (m && m[2]) codes.add(m[2]);
+          });
+          document.querySelectorAll('[data-shortcode]').forEach(el => {
+            const c = el.getAttribute('data-shortcode');
+            if (c) codes.add(c);
+          });
+          return Array.from(codes);
+        });
+        const unseenCodes = domCodes.filter(c => !imgSeen.has(c));
+        domAdded = unseenCodes.length;
+        unseenCodes.forEach(c => imgSeen.add(c));
+      } catch (e) { dbg('[scroll] DOM extraction failed:', e && e.message); }
+
+      // Early exit: si ni API ni DOM produjeron nuevos posts, página exhausta
+      const apiAdded = posts.length - prevCount;
+      prevCount = posts.length;
+      const added = Math.max(apiAdded, domAdded);
       if (added === 0) {
         staleCount++;
         if (staleCount >= 5) {
-          dbg('[scroll] no new posts for 5 scrolls, stopping early');
+          dbg('[scroll] no new content for 5 scrolls, stopping early');
           break;
         }
       } else {
-        staleCount = 0; // reset on success
+        staleCount = 0;
       }
-      prevCount = posts.length;
+
+      // Update spinner with real-time post count
+      if (progressSpin) {
+        const totalVisible = Math.max(posts.length, imgSeen.size);
+        progressSpin.update(t('spinScrolling') + `  (${totalVisible})`);
+      }
 
       // Progress log every 10 scrolls
       if ((i + 1) % 10 === 0) {
-        dbg(`[scroll] progress: ${i + 1}/${maxScrolls} scrolls, ${posts.length} posts captured`);
+        dbg(`[scroll] progress: ${i + 1}/${maxScrolls} scrolls, ${posts.length} API posts, ${imgSeen.size} DOM shortcodes`);
       }
     }
   } finally {
     page.off('response', handler);
   }
 
-  // Fallback: try to extract any remaining posts from DOM after scrolling
-  if (posts.length < limit) {
-    try {
-      const domCodes = await page.evaluate(() => {
-        const codes = new Set();
-        document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]').forEach(a => {
-          const href = a.getAttribute('href') || '';
-          const match = href.match(/\/(p|reel)\/([^\/?#]+)/);
-          if (match && match[2]) codes.add(match[2]);
-        });
-        document.querySelectorAll('[data-shortcode]').forEach(el => {
-          const code = el.getAttribute('data-shortcode');
-          if (code) codes.add(code);
-        });
-        return Array.from(codes);
-      });
-      const unseenDomCodes = domCodes.filter(c => !seen.has(c));
-      dbg('[scroll] DOM fallback extracted', domCodes.length, 'shortcodes,', unseenDomCodes.length, 'unseen');
-      if (unseenDomCodes.length > 0) {
-        posts._domShortcodes = unseenDomCodes;
-      }
-    } catch (e) {
-      dbg('[scroll] DOM fallback failed:', (e && e.message) || e);
-    }
+  // Fallback: extract all unprocessed DOM codes for rebuild
+  const totalDomCodes = Array.from(imgSeen);
+  const unseenDomCodes = totalDomCodes.filter(c => !seen.has(c));
+  if (unseenDomCodes.length > 0) {
+    posts._domShortcodes = unseenDomCodes;
+    dbg('[scroll] DOM extracted', unseenDomCodes.length, 'unseen shortcodes for rebuild');
   }
 
   return posts;
@@ -1397,7 +1453,7 @@ async function extractProfile(username, options = {}) {
         spin2 = ui.createSpinner(t('spinScrolling'));
         spin2.start();
         const scrollLimit = effectiveMax === Infinity ? Math.min(totalKnown || 2000, 2000) : effectiveMax;
-        const scrollResult = await scrollForMorePosts(allPosts, scrollLimit);
+        const scrollResult = await scrollForMorePosts(allPosts, scrollLimit, spin2);
         // Extract DOM shortcodes from scroll fallback BEFORE losing them in .filter()
         const scrollDomShortcodes = Array.isArray(scrollResult._domShortcodes) ? scrollResult._domShortcodes : [];
         delete scrollResult._domShortcodes;

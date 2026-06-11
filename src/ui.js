@@ -82,7 +82,7 @@ function createSpinner(message) {
     },
     stop(finalMsg, success = true) {
       if (timer) { clearInterval(timer); timer = null; }
-      if (isTTY) process.stdout.write('\r' + ' '.repeat(message.length + 20) + '\r');
+      if (isTTY) process.stdout.write('\x1b[2K\r');
       if (finalMsg) {
         const icon = success ? C.green('✓') : C.red('✗');
         console.log('  ' + icon + ' ' + (success ? C.green(finalMsg) : C.red(finalMsg)));
@@ -117,7 +117,7 @@ function createIndeterminateBar(label) {
     },
     stop(msg, success = true) {
       if (timer) { clearInterval(timer); timer = null; }
-      if (isTTY) process.stdout.write('\r' + ' '.repeat(width + label.length + 10) + '\r');
+      if (isTTY) process.stdout.write('\x1b[2K\r');
       if (msg) {
         const icon = success ? C.green('✓') : C.red('✗');
         console.log('  ' + icon + ' ' + (success ? C.green(msg) : C.red(msg)));

@@ -207,29 +207,27 @@ async function run() {
     await selectLanguage();
   }
 
-  // ── Ping backend to wake it up (Render free tier sleeps) ──────────────────
-  // Wait up to 12s for the server to wake before checking license.
-  // If it doesn't respond in time, checkLicense will fall back to cache.
+  // ── License check with spinner ───────────────────────────────────────────────
+  const licenseSpin = ui.createSpinner(t('wakingServer'));
+  licenseSpin.start();
+  // Ping backend to wake it up (Render free tier sleeps)
+  // Wait up to 12s; checkLicense falls back to cache if unresponsive.
   try {
     const axios = require('axios');
     const API_BASE = process.env.IGX_API_URL || 'https://igextractor-backend.onrender.com';
-    ui.dim(t('wakingServer'));
     try {
       await axios.get(API_BASE + '/health', { timeout: 12000 });
     } catch {}
   } catch {}
-
-  // ── License check (non-blocking) ─────────────────────────────────────────────
-  ui.dim(t('checkingLicense'));
+  licenseSpin.update(t('checkingLicense'));
   const licenseInfo = await license.checkLicense();
 
   if (licenseInfo.plan === 'pro') {
+    licenseSpin.stop(t('proVerified'), true);
     if (licenseInfo.offline) ui.warn(t('offlineMode'));
-    else                      ui.ok(t('proVerified'));
   } else {
-    if (licenseInfo.key && !licenseInfo.valid) {
-      ui.warn(t('keyInvalid'));
-    }
+    if (licenseInfo.key && !licenseInfo.valid) licenseSpin.stop(t('keyInvalid'), false);
+    else                                        licenseSpin.stop(null);
   }
 
   const { mainMenu } = require('./menu');
