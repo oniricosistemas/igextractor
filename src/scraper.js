@@ -1684,8 +1684,13 @@ async function runMediaDownload(outputDir, allPosts, limit, wantPhotos, wantReel
   const scanLimit = options.scanLimit || 500;
   
   const totalTarget = (wantPhotos ? photoLimit : 0) + (wantReels ? reelLimit : 0);
-  // Track inspected items for progress (stops bar from stalling on skipped posts)
-  const barLimit = Math.min(filtered.length, scanLimit === Infinity ? filtered.length : scanLimit);
+  // Pre-count individual media items (photos + videos from carousels) for accurate progress
+  const postCount = Math.min(filtered.length, scanLimit === Infinity ? filtered.length : scanLimit);
+  let estimatedMediaItems = 0;
+  for (let k = 0; k < postCount; k++) {
+    estimatedMediaItems += getCarouselItems(filtered[k]).length;
+  }
+  const barLimit = estimatedMediaItems || postCount;
   const bar = ui.createProgressBar(wantReels && !wantPhotos ? t('reelLabel') : t('imageLabel'), 'brand');
 
   const mediaMap = [];
