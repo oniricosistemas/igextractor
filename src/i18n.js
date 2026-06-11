@@ -265,6 +265,8 @@ const STRINGS = {
     boxPro:             ' ★ PRO ',
     profileCardTitle:   ' Instagram Profile ',
     proFeatureHeader:   ' ★ PRO FEATURE REQUIRED ',
+    summaryOldest:        'Oldest post',
+    summaryNewest:        'Newest post',
   },
 
   es: {
@@ -523,6 +525,8 @@ const STRINGS = {
     boxPro:             ' ★ PRO ',
     profileCardTitle:   ' Perfil de Instagram ',
     proFeatureHeader:   ' ★ FUNCIÓN PRO REQUERIDA ',
+    summaryOldest:        'Post más antiguo',
+    summaryNewest:        'Post más reciente',
   },
 };
 
