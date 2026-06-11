@@ -274,6 +274,17 @@ function getPostCode(node) {
   return node.code || node.shortcode || node.pk || node.id || null;
 }
 
+function getPostOwnerId(node) {
+  if (!node || typeof node !== 'object') return null;
+  // GraphQL format: owner.pk
+  if (node.owner && (node.owner.pk || node.owner.id)) return String(node.owner.pk || node.owner.id);
+  // REST format: user.pk
+  if (node.user && (node.user.pk || node.user.id)) return String(node.user.pk || node.user.id);
+  // Direct user_id field
+  if (node.user_id) return String(node.user_id);
+  return null;
+}
+
 function getPostTimestamp(node) {
   if (!node || typeof node !== 'object') return 0;
   const n = node;
@@ -1504,6 +1515,20 @@ async function extractProfile(username, options = {}) {
       seen.add(key);
       return true;
     });
+
+    // ── Filter out posts from OTHER users (feed pollution) ──────────────────────
+    if (profileData && profileData.pk) {
+      const targetPk = String(profileData.pk);
+      const beforeCount = allPosts.length;
+      allPosts = allPosts.filter(p => {
+        const ownerPk = getPostOwnerId(p);
+        // Keep posts with unknown owner (might be from target, just missing field)
+        if (!ownerPk) return true;
+        return ownerPk === targetPk;
+      });
+      const removed = beforeCount - allPosts.length;
+      if (removed > 0) dbg(`[extractProfile] filtered ${removed} posts from other users`);
+    }
     
     const summary = {};
     // ── oldest/newest post dates ────────────────────────────────────────────────
@@ -1724,9 +1749,10 @@ async function runMediaDownload(outputDir, allPosts, limit, wantPhotos, wantReel
 
       const items = getCarouselItems(post);
       const isCarousel = items.length > 1;
-      const postDir = path.join(outputDir, `post_${code}`);
-      if (isCarousel && !fs.existsSync(postDir)) fs.mkdirSync(postDir, { recursive: true });
       const postTs = getPostTimestamp(post) || 0;
+      const tsStr = formatTs(postTs, 'file');
+      const postDir = path.join(outputDir, tsStr ? `${tsStr}_post_${code}` : `post_${code}`);
+      if (isCarousel && !fs.existsSync(postDir)) fs.mkdirSync(postDir, { recursive: true });
 
       let firstDownloadedPath = null;
       let firstDownloadedUrl = null;
