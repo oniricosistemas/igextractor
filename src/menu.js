@@ -352,6 +352,8 @@ function printSummary(result) {
   if (result.summary.reels     != null) rows.push([t('summaryReels'),     String(result.summary.reels)]);
   if (result.summary.stories   != null) rows.push([t('summaryStories'),   String(result.summary.stories)]);
   if (result.summary.captions  != null) rows.push([t('summaryCaptions'),  String(result.summary.captions)]);
+  if (result.summary.oldestPost)        rows.push([t('summaryOldest'),   result.summary.oldestPost]);
+  if (result.summary.newestPost)        rows.push([t('summaryNewest'),   result.summary.newestPost]);
   if (result.summary.comments  != null) rows.push([t('summaryComments'),  String(result.summary.comments)]);
   if (result.summary.followers != null) rows.push([t('summaryFollowers'), String(result.summary.followers)]);
   if (result.summary.following != null) rows.push([t('summaryFollowing'), String(result.summary.following)]);
