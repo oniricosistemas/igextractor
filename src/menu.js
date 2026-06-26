@@ -206,6 +206,23 @@ async function extractFlow(pro) {
 
   const { mediaType, tasks, downloadLimit, proxy, outputDir } = downloadChoices;
 
+  // Ask followers order (PRO only)
+  let followersOrder = 'date_followed_latest';
+  if (tasks.includes('followers') && pro) {
+    const { fo } = await inquirer.prompt([{
+      type:    'list',
+      name:    'fo',
+      message: ui.C.cyan(t('askFollowersOrder')),
+      prefix:  ' ',
+      choices: [
+        { name: ui.C.white('  ' + t('followersOrderLatest')), value: 'date_followed_latest' },
+        { name: ui.C.white('  ' + t('followersOrderOldest')), value: 'date_followed_earliest' },
+      ],
+      default: 'date_followed_latest',
+    }]);
+    followersOrder = fo;
+  }
+
   // Show limit info
   if (downloadLimit > 0) {
     ui.info(t('limitCustom', downloadLimit));
@@ -252,6 +269,7 @@ async function extractFlow(pro) {
       comments:      tasks.includes('comments'),
       commentLimit:  commentLimit || 10,
       followers:     tasks.includes('followers'),
+      followersOrder: followersOrder,
       following:     tasks.includes('following'),
       downloadLimit: downloadLimit || 0,
       proxy:         proxy     || undefined,

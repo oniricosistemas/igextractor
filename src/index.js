@@ -157,6 +157,16 @@ async function run() {
     if (args.includes('--no-captions')) options.captions = false;
     if (args.includes('--comments')) options.comments = true;
     if (args.includes('--followers')) options.followers = true;
+    if (args.includes('--followers-order')) {
+      const idx = args.indexOf('--followers-order');
+      const val = args[idx + 1];
+      if (val === 'latest') options.followersOrder = 'date_followed_latest';
+      else if (val === 'oldest') options.followersOrder = 'date_followed_earliest';
+      else {
+        ui.warn('Invalid --followers-order value. Use "latest" or "oldest". Defaulting to "latest".');
+        options.followersOrder = 'date_followed_latest';
+      }
+    }
     if (args.includes('--following')) options.following = true;
 
     const commentLimitArg = args.find(a => a.startsWith('--comment-limit=') || a === '--comment-limit');

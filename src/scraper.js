@@ -8,6 +8,7 @@ const ui    = require('./ui');
 const { isPro, readSessionId, saveSessionId } = require('./license');
 const { t }          = require('./i18n');
 const { dbg }        = require('./debug');
+const { fetchFollowers, fetchFollowing, graphqlFetchFollowers, graphqlFetchFollowing, DEFAULT_MAX_RESULTS } = require('./mobileApi');
 
 // Utility to parse Instagram's number formats (e.g., "1.2M", "7,890", "1.200" in EU)
 function parseNum(s) {
@@ -1569,13 +1570,14 @@ async function extractProfile(username, options = {}) {
       if (!pro) ui.upgradeBox(t('optComments'));
       else summary.comments = await runCommentDownload(outputDir, allPosts, profileData, options.commentLimit || 10);
     }
-    if (options.followers) {
-      if (!pro) ui.upgradeBox(t('optFollowers'));
-      else summary.followers = await runFollowersDownload(outputDir, profileData);
+    if (options.followers && pro) {
+      if (options.followersOrder) {
+        try { profileData._followersOrder = options.followersOrder; } catch (e) {}
+      }
+      summary.followers = await runFollowersDownload(outputDir, profileData);
     }
-    if (options.following) {
-      if (!pro) ui.upgradeBox(t('optFollowing'));
-      else summary.following = await runFollowingDownload(outputDir, profileData);
+    if (options.following && pro) {
+      summary.following = await runFollowingDownload(outputDir, profileData);
     }
     
     fs.writeFileSync(path.join(outputDir, 'profile.json'), JSON.stringify(profileData, null, 2));
@@ -2098,6 +2100,20 @@ async function browserFetchJson(url) {
   return json;
 }
 
+async function extractCsrfToken() {
+  try {
+    const page = await getPage();
+    const cookies = await page.cookies('https://www.instagram.com');
+    const csrfCookie = cookies.find(c => c.name === 'csrftoken');
+    const token = csrfCookie ? csrfCookie.value : null;
+    dbg('[mobileApi] csrftoken extracted:', token ? 'yes' : 'no');
+    return token;
+  } catch (e) {
+    dbg('[mobileApi] csrftoken extraction failed:', e.message);
+    return null;
+  }
+}
+
 async function runCommentDownload(outputDir, allPosts, profileData, limit = 10) {
   const commentsMap = {};
   ui.sectionHeader(t('downloadingComments'));
@@ -2277,37 +2293,74 @@ async function runFollowersDownload(outputDir, profileData) {
   if (!userId) { ui.err(t('noUserId')); return 0; }
 
   ui.sectionHeader(t('downloadingFollowers'));
-  const bar = ui.createProgressBar(t('followerLabel'), 'brand');
+  const spin = ui.createSpinner(t('fetchingFollowers'));
+  spin.start();
 
-  const results = [];
-  let nextMaxId = null;
-  let hasMore   = true;
+  let order = 'date_followed_latest';
+  try {
+    if (profileData._followersOrder) order = profileData._followersOrder;
+  } catch (e) { dbg('[followers] failed to read order:', e.message); }
 
   try {
-    while (hasMore && results.length < 5000) {
-      const params = new URLSearchParams({ count: '100', search_surface: 'follow_list_page' });
-      if (nextMaxId) params.set('max_id', nextMaxId);
-      const endpoint = `${IG_BASE}/api/v1/friendships/${userId}/followers/?${params}`;
-      dbg('[followers] browser fetch', endpoint);
-      const json = await browserFetchJson(endpoint);
-      if (!json || json.__error) { dbg('[followers] API error:', json && json.__error); break; }
-      const users = json.users || [];
-      for (const u of users) {
-        results.push({ pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
-      }
-      hasMore   = json.big_list || (json.next_max_id != null);
-      nextMaxId = json.next_max_id || null;
-      if (!nextMaxId) hasMore = false;
-      if (bar && typeof bar.tick === 'function') bar.tick(results.length, 5000);
-      if (hasMore) await sleep(1500);
-    }
-  } catch (e) {
-    dbg('[followers] error:', e.message);
-  }
+    let results;
 
-  bar.stop();
-  fs.writeFileSync(path.join(outputDir, 'followers.json'), JSON.stringify(results, null, 2));
-  return results.length;
+    // Primary: GraphQL (supports date_followed_latest/earliest ordering)
+    if (order && order !== 'default') {
+      try {
+        results = await graphqlFetchFollowers(userId, _sessionId, {
+          order,
+          maxResults: DEFAULT_MAX_RESULTS,
+          onProgress: count => spin.update(t('fetchedCount', count, t('followerLabel'))),
+        });
+      } catch (gqlErr) {
+        const msg = gqlErr.message || '';
+        if (msg.includes('GRAPHQL_POST_FAILED') || msg.includes('RATE_LIMITED') || msg.includes('feedback_required')) {
+          dbg('[followers] GraphQL failed, falling back to REST API:', msg);
+          // Lazy-fetch csrfToken only when REST fallback is needed
+          const csrfToken = await extractCsrfToken();
+          // Add delay before REST fallback to let rate limit cool down
+          await new Promise(r => setTimeout(r, 3000));
+          results = await fetchFollowers(userId, _sessionId, csrfToken, {
+            order,
+            maxResults: DEFAULT_MAX_RESULTS,
+            onProgress: count => spin.update(t('fetchedCount', count, t('followerLabel'))),
+          });
+        } else {
+          throw gqlErr;
+        }
+      }
+    } else {
+      const csrfToken = await extractCsrfToken();
+      results = await fetchFollowers(userId, _sessionId, csrfToken, {
+        order,
+        maxResults: DEFAULT_MAX_RESULTS,
+        onProgress: count => spin.update(t('fetchedCount', count, t('followerLabel'))),
+      });
+    }
+
+    spin.stop(t('savedFollowers', results.length));
+    fs.writeFileSync(path.join(outputDir, 'followers.json'), JSON.stringify(results, null, 2));
+    
+    // Warn if downloaded count differs from profile count
+    const expectedFollowers = profileData.edge_followed_by?.count || 0;
+    if (expectedFollowers > 0 && results.length < expectedFollowers) {
+      if (results.length >= DEFAULT_MAX_RESULTS) {
+        ui.warn(t('limitFollowersWarn', results.length, expectedFollowers));
+      } else {
+        ui.warn(t('partialFollowersWarn', results.length, expectedFollowers));
+      }
+    }
+    
+    return results.length;
+  } catch (e) {
+    const isAuthError = e.message && e.message.includes('AUTH_ERROR');
+    spin.fail(isAuthError ? '[followers] authentication failed' : '[followers] ' + (e.message || 'unknown error'));
+    dbg('[followers] mobile API error:', e.message);
+    if (isAuthError) {
+      ui.err(t('authRequired'));
+    }
+    return 0;
+  }
 }
 
 async function runFollowingDownload(outputDir, profileData) {
@@ -2315,37 +2368,48 @@ async function runFollowingDownload(outputDir, profileData) {
   if (!userId) { ui.err(t('noUserId')); return 0; }
 
   ui.sectionHeader(t('downloadingFollowing'));
-  const bar = ui.createProgressBar(t('followingLabel'), 'brand');
+  const spin = ui.createSpinner(t('fetchingFollowing'));
+  spin.start();
 
-  const results = [];
-  let nextMaxId = null;
-  let hasMore   = true;
+  let order = 'date_followed_latest';
+  try {
+    if (profileData._followingOrder) order = profileData._followingOrder;
+  } catch (e) { dbg('[following] failed to read order:', e.message); }
 
   try {
-    while (hasMore && results.length < 5000) {
-      const params = new URLSearchParams({ count: '100' });
-      if (nextMaxId) params.set('max_id', nextMaxId);
-      const endpoint = `${IG_BASE}/api/v1/friendships/${userId}/following/?${params}`;
-      dbg('[following] browser fetch', endpoint);
-      const json = await browserFetchJson(endpoint);
-      if (!json || json.__error) { dbg('[following] API error:', json && json.__error); break; }
-      const users = json.users || [];
-      for (const u of users) {
-        results.push({ pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
-      }
-      hasMore   = json.big_list || (json.next_max_id != null);
-      nextMaxId = json.next_max_id || null;
-      if (!nextMaxId) hasMore = false;
-      if (bar && typeof bar.tick === 'function') bar.tick(results.length, 5000);
-      if (hasMore) await sleep(1500);
-    }
-  } catch (e) {
-    dbg('[following] error:', e.message);
-  }
+    const csrfToken = await extractCsrfToken();
 
-  bar.stop();
-  fs.writeFileSync(path.join(outputDir, 'following.json'), JSON.stringify(results, null, 2));
-  return results.length;
+    // REST API para following (GraphQL no respeta el order en la 1er página,
+    // siempre devuelve los mismos usuarios iniciales sin importar el orden)
+    const results = await fetchFollowing(userId, _sessionId, csrfToken, {
+      order,
+      maxResults: DEFAULT_MAX_RESULTS,
+      onProgress: count => spin.update(t('fetchedCount', count, t('followingLabel'))),
+    });
+
+    spin.stop(t('savedFollowing', results.length));
+    fs.writeFileSync(path.join(outputDir, 'following.json'), JSON.stringify(results, null, 2));
+    
+    // Warn if downloaded count differs from profile count
+    const expectedFollowing = profileData.edge_follow?.count || 0;
+    if (expectedFollowing > 0 && results.length < expectedFollowing) {
+      if (results.length >= DEFAULT_MAX_RESULTS) {
+        ui.warn(t('limitFollowingWarn', results.length, expectedFollowing));
+      } else {
+        ui.warn(t('partialFollowingWarn', results.length, expectedFollowing));
+      }
+    }
+    
+    return results.length;
+  } catch (e) {
+    const isAuthError = e.message && e.message.includes('AUTH_ERROR');
+    spin.fail(isAuthError ? '[following] authentication failed' : '[following] ' + (e.message || 'unknown error'));
+    dbg('[following] mobile API error:', e.message);
+    if (isAuthError) {
+      ui.err(t('authRequired'));
+    }
+    return 0;
+  }
 }
 
 function getCaptionText(node) {
