@@ -1,6 +1,6 @@
 {
   "name": "igextractor",
-  "version": "1.0.61",
+  "version": "1.0.62",
   "description": "Instagram data extractor TUI - Free & Pro",
   "main": "src/index.js",
   "bin": {
