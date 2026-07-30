@@ -2306,6 +2306,7 @@ async function runFollowersDownload(outputDir, profileData) {
   }
 
   bar.stop();
+  results.sort((a, b) => a.username.localeCompare(b.username, 'en', { sensitivity: 'base' }));
   fs.writeFileSync(path.join(outputDir, 'followers.json'), JSON.stringify(results, null, 2));
   return results.length;
 }
@@ -2344,6 +2345,7 @@ async function runFollowingDownload(outputDir, profileData) {
   }
 
   bar.stop();
+  results.sort((a, b) => a.username.localeCompare(b.username, 'en', { sensitivity: 'base' }));
   fs.writeFileSync(path.join(outputDir, 'following.json'), JSON.stringify(results, null, 2));
   return results.length;
 }
