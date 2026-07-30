@@ -936,9 +936,12 @@ async function navigateAndCapture(username, options = {}) {
 
       if (metaCounts.follower_count || metaCounts.following_count || metaCounts.media_count) {
         dbg('[capture] raw html og counts:', metaCounts, '| current follower_count:', result.user.follower_count);
-        if (metaCounts.follower_count)  result.user.follower_count  = metaCounts.follower_count;
-        if (metaCounts.following_count) result.user.following_count = metaCounts.following_count;
-        if (metaCounts.media_count)     result.user.media_count     = metaCounts.media_count;
+        if (metaCounts.follower_count && !result.user.follower_count)
+          result.user.follower_count = metaCounts.follower_count;
+        if (metaCounts.following_count && !result.user.following_count)
+          result.user.following_count = metaCounts.following_count;
+        if (metaCounts.media_count && !result.user.media_count)
+          result.user.media_count = metaCounts.media_count;
         if (!result.user.full_name && full_name) result.user.full_name = full_name;
         dbg('[capture] after raw html fill: follower_count:', result.user.follower_count);
       }
