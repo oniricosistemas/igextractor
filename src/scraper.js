@@ -951,7 +951,7 @@ async function navigateAndCapture(username, options = {}) {
   }
 
   // ── Layer 2: try page.evaluate (wait for DOM render) if we still have no counters ──
-  if (result.user && !result.user.follower_count) {
+  if (result.user && (!result.user.follower_count || !result.user.following_count)) {
     try {
       await page.waitForSelector('meta[property="og:description"]', { timeout: 15000 }).catch(() => {});
       const ogData = await page.evaluate(new Function(`
@@ -976,9 +976,9 @@ async function navigateAndCapture(username, options = {}) {
         const ff = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Followers?|seguidores)/i);
         const fg = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Following|seguidos)/i);
         const pp = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Posts?|publicaciones)/i);
-        if (ff) result.user.follower_count  = parseNum(ff[1]);
-        if (fg) result.user.following_count = parseNum(fg[1]);
-        if (pp) result.user.media_count     = parseNum(pp[1]);
+        if (ff && !result.user.follower_count)  result.user.follower_count  = parseNum(ff[1]);
+        if (fg && !result.user.following_count) result.user.following_count = parseNum(fg[1]);
+        if (pp && !result.user.media_count)     result.user.media_count     = parseNum(pp[1]);
         if (!result.user.full_name && full_name) result.user.full_name = full_name;
         dbg('[capture] evaluate fill: follower_count:', result.user.follower_count);
       }
@@ -988,7 +988,7 @@ async function navigateAndCapture(username, options = {}) {
   }
 
   // ── Layer 3: fetch user info directly via browser API (bypass 429) ──
-  if (result.user && !result.user.follower_count && result.user.pk) {
+  if (result.user && (!result.user.follower_count || !result.user.following_count) && result.user.pk) {
     try {
       const apiData = await page.evaluate(new Function('pk', `
         return (async () => {
@@ -2282,12 +2282,12 @@ async function runFollowersDownload(outputDir, profileData) {
   ui.sectionHeader(t('downloadingFollowers'));
   const bar = ui.createProgressBar(t('followerLabel'), 'brand');
 
-  const results = [];
+  const resultsMap = new Map();
   let nextMaxId = null;
   let hasMore   = true;
 
   try {
-    while (hasMore && results.length < 5000) {
+    while (hasMore && resultsMap.size < 5000) {
       const params = new URLSearchParams({ count: '100', search_surface: 'follow_list_page' });
       if (nextMaxId) params.set('max_id', nextMaxId);
       const endpoint = `${IG_BASE}/api/v1/friendships/${userId}/followers/?${params}`;
@@ -2296,12 +2296,12 @@ async function runFollowersDownload(outputDir, profileData) {
       if (!json || json.__error) { dbg('[followers] API error:', json && json.__error); break; }
       const users = json.users || [];
       for (const u of users) {
-        results.push({ pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
+        resultsMap.set(u.pk, { pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
       }
       hasMore   = json.big_list || (json.next_max_id != null);
       nextMaxId = json.next_max_id || null;
       if (!nextMaxId) hasMore = false;
-      if (bar && typeof bar.tick === 'function') bar.tick(results.length, 5000);
+      if (bar && typeof bar.tick === 'function') bar.tick(resultsMap.size, 5000);
       if (hasMore) await sleep(1500);
     }
   } catch (e) {
@@ -2309,6 +2309,7 @@ async function runFollowersDownload(outputDir, profileData) {
   }
 
   bar.stop();
+  const results = [...resultsMap.values()];
   results.sort((a, b) => a.username.localeCompare(b.username, 'en', { sensitivity: 'base' }));
   fs.writeFileSync(path.join(outputDir, 'followers.json'), JSON.stringify(results, null, 2));
   return results.length;
@@ -2321,12 +2322,12 @@ async function runFollowingDownload(outputDir, profileData) {
   ui.sectionHeader(t('downloadingFollowing'));
   const bar = ui.createProgressBar(t('followingLabel'), 'brand');
 
-  const results = [];
+  const resultsMap = new Map();
   let nextMaxId = null;
   let hasMore   = true;
 
   try {
-    while (hasMore && results.length < 5000) {
+    while (hasMore && resultsMap.size < 5000) {
       const params = new URLSearchParams({ count: '100' });
       if (nextMaxId) params.set('max_id', nextMaxId);
       const endpoint = `${IG_BASE}/api/v1/friendships/${userId}/following/?${params}`;
@@ -2335,12 +2336,12 @@ async function runFollowingDownload(outputDir, profileData) {
       if (!json || json.__error) { dbg('[following] API error:', json && json.__error); break; }
       const users = json.users || [];
       for (const u of users) {
-        results.push({ pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
+        resultsMap.set(u.pk, { pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
       }
       hasMore   = json.big_list || (json.next_max_id != null);
       nextMaxId = json.next_max_id || null;
       if (!nextMaxId) hasMore = false;
-      if (bar && typeof bar.tick === 'function') bar.tick(results.length, 5000);
+      if (bar && typeof bar.tick === 'function') bar.tick(resultsMap.size, 5000);
       if (hasMore) await sleep(1500);
     }
   } catch (e) {
@@ -2348,6 +2349,7 @@ async function runFollowingDownload(outputDir, profileData) {
   }
 
   bar.stop();
+  const results = [...resultsMap.values()];
   results.sort((a, b) => a.username.localeCompare(b.username, 'en', { sensitivity: 'base' }));
   fs.writeFileSync(path.join(outputDir, 'following.json'), JSON.stringify(results, null, 2));
   return results.length;

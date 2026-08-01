@@ -6,3 +6,4 @@ ig_*/
 .temp_env
 debug/
 dist/
+.atl/
