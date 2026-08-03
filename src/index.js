@@ -165,6 +165,7 @@ async function run() {
       : parseInt(args[args.indexOf(commentLimitArg) + 1], 10);
 
     // ── -apiKey inline: validate + save before extraction so isPro() is correct ──
+    let inlineValidated = false;
     const apiKeyArg = args.find(a => a === '-apiKey' || a === '--apiKey');
     if (apiKeyArg) {
       const key = args[args.indexOf(apiKeyArg) + 1];
@@ -173,6 +174,7 @@ async function run() {
         if (result.valid || result.offline) {
           license.saveApiKey(key);
           license.setPlan('pro');
+          inlineValidated = true;
           ui.ok(result.offline ? t('keySavedOffline') : t('proActivated').split('\n')[0]);
         } else {
           ui.err(t('keyInvalidCli', result.message));
@@ -182,6 +184,11 @@ async function run() {
     }
 
     try {
+      // Ensure saved API key is loaded + validated so Pro features (followers/following)
+      // are unlocked in non-interactive mode, not just in the menu flow.
+      // Skip re-validation when an inline -apiKey already validated + setPlan('pro'): a second
+      // network call could transiently fail and degrade the plan back to free.
+      if (!inlineValidated) await license.checkLicense();
       const { extractProfile } = require('./scraper');
       ui.info(t('nonInteractiveStart', username));
       await extractProfile(username, options);

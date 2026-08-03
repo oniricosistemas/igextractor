@@ -935,13 +935,15 @@ async function navigateAndCapture(username, options = {}) {
       }
 
       if (metaCounts.follower_count || metaCounts.following_count || metaCounts.media_count) {
-        dbg('[capture] raw html og counts:', metaCounts, '| current follower_count:', result.user.follower_count);
-        if (metaCounts.follower_count && !result.user.follower_count)
-          result.user.follower_count = metaCounts.follower_count;
-        if (metaCounts.following_count && !result.user.following_count)
+        const hasFollowers = result.user.follower_count || (result.user.edge_followed_by && result.user.edge_followed_by.count);
+        const hasFollowing = result.user.following_count || (result.user.edge_follow && result.user.edge_follow.count);
+        dbg('[capture] raw html og counts:', metaCounts, '| hasFollowers:', hasFollowers, '| hasFollowing:', hasFollowing);
+        if (metaCounts.follower_count && !hasFollowers)
+          result.user.follower_count  = metaCounts.follower_count;
+        if (metaCounts.following_count && !hasFollowing)
           result.user.following_count = metaCounts.following_count;
         if (metaCounts.media_count && !result.user.media_count)
-          result.user.media_count = metaCounts.media_count;
+          result.user.media_count     = metaCounts.media_count;
         if (!result.user.full_name && full_name) result.user.full_name = full_name;
         dbg('[capture] after raw html fill: follower_count:', result.user.follower_count);
       }
@@ -976,8 +978,10 @@ async function navigateAndCapture(username, options = {}) {
         const ff = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Followers?|seguidores)/i);
         const fg = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Following|seguidos)/i);
         const pp = content.match(/([\d.,]+[KMBkmb]?)\s*(?:Posts?|publicaciones)/i);
-        if (ff && !result.user.follower_count)  result.user.follower_count  = parseNum(ff[1]);
-        if (fg && !result.user.following_count) result.user.following_count = parseNum(fg[1]);
+        const hasFollowers2 = result.user.follower_count || (result.user.edge_followed_by && result.user.edge_followed_by.count);
+        const hasFollowing2 = result.user.following_count || (result.user.edge_follow && result.user.edge_follow.count);
+        if (ff && !hasFollowers2)  result.user.follower_count  = parseNum(ff[1]);
+        if (fg && !hasFollowing2) result.user.following_count = parseNum(fg[1]);
         if (pp && !result.user.media_count)     result.user.media_count     = parseNum(pp[1]);
         if (!result.user.full_name && full_name) result.user.full_name = full_name;
         dbg('[capture] evaluate fill: follower_count:', result.user.follower_count);
