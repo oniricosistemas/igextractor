@@ -2291,13 +2291,26 @@ async function runFollowersDownload(outputDir, profileData) {
   let hasMore   = true;
 
   try {
+    let attempt = 0;
     while (hasMore && resultsMap.size < 5000) {
       const params = new URLSearchParams({ count: '100', search_surface: 'follow_list_page' });
       if (nextMaxId) params.set('max_id', nextMaxId);
       const endpoint = `${IG_BASE}/api/v1/friendships/${userId}/followers/?${params}`;
       dbg('[followers] browser fetch', endpoint);
       const json = await browserFetchJson(endpoint);
-      if (!json || json.__error) { dbg('[followers] API error:', json && json.__error); break; }
+      if (!json || json.__error) {
+        dbg('[followers] API error:', json && json.__error);
+        if (json && json.__error === 429 && attempt < 2) {
+          // Rate limited — wait with backoff and retry the same page
+          attempt++;
+          const delay = attempt * 5000;
+          dbg('[followers] 429 rate limit, retrying after', delay, 'ms');
+          await sleep(delay);
+          continue;
+        }
+        break;
+      }
+      attempt = 0;
       const users = json.users || [];
       for (const u of users) {
         resultsMap.set(u.pk, { pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
@@ -2331,13 +2344,26 @@ async function runFollowingDownload(outputDir, profileData) {
   let hasMore   = true;
 
   try {
+    let attempt = 0;
     while (hasMore && resultsMap.size < 5000) {
       const params = new URLSearchParams({ count: '100' });
       if (nextMaxId) params.set('max_id', nextMaxId);
       const endpoint = `${IG_BASE}/api/v1/friendships/${userId}/following/?${params}`;
       dbg('[following] browser fetch', endpoint);
       const json = await browserFetchJson(endpoint);
-      if (!json || json.__error) { dbg('[following] API error:', json && json.__error); break; }
+      if (!json || json.__error) {
+        dbg('[following] API error:', json && json.__error);
+        if (json && json.__error === 429 && attempt < 2) {
+          // Rate limited — wait with backoff and retry the same page
+          attempt++;
+          const delay = attempt * 5000;
+          dbg('[following] 429 rate limit, retrying after', delay, 'ms');
+          await sleep(delay);
+          continue;
+        }
+        break;
+      }
+      attempt = 0;
       const users = json.users || [];
       for (const u of users) {
         resultsMap.set(u.pk, { pk: u.pk, username: u.username, full_name: u.full_name, is_private: u.is_private, is_verified: u.is_verified });
