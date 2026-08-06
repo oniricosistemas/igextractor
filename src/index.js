@@ -4,7 +4,7 @@ const ui      = require('./ui');
 const license = require('./license');
 const i18n    = require('./i18n');
 const { t, setLang, loadSavedLang, saveLang } = i18n;
-const { setDebug } = require('./debug');
+const { setDebug, dbg } = require('./debug');
 
 async function run() {
   const args = process.argv.slice(2);
@@ -158,6 +158,8 @@ async function run() {
     if (args.includes('--comments')) options.comments = true;
     if (args.includes('--followers')) options.followers = true;
     if (args.includes('--following')) options.following = true;
+    dbg('[cli-options] args:', JSON.stringify(args));
+    dbg('[cli-options] followers=', !!options.followers, 'following=', !!options.following);
 
     const commentLimitArg = args.find(a => a.startsWith('--comment-limit=') || a === '--comment-limit');
     if (commentLimitArg) options.commentLimit = commentLimitArg.startsWith('--comment-limit=')
