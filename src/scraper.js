@@ -1577,10 +1577,12 @@ async function extractProfile(username, options = {}) {
       else summary.comments = await runCommentDownload(outputDir, allPosts, profileData, options.commentLimit || 10);
     }
     if (options.followers) {
+      dbg('[extractProfile-debug] followers block reached, pro=', pro, 'hasFollowersOpt=', !!options.followers);
       if (!pro) ui.upgradeBox(t('optFollowers'));
       else summary.followers = await runFollowersDownload(outputDir, profileData);
     }
     if (options.following) {
+      dbg('[extractProfile-debug] following block reached, pro=', pro, 'hasFollowingOpt=', !!options.following);
       if (!pro) ui.upgradeBox(t('optFollowing'));
       else summary.following = await runFollowingDownload(outputDir, profileData);
     }
