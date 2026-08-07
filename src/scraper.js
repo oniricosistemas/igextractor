@@ -1459,7 +1459,7 @@ async function extractProfile(username, options = {}) {
       }
     }
 
-    if (!rebuiltFromShortcodes && allPosts.length === 0) {
+    if (!rebuiltFromShortcodes && (allPosts.length === 0 || (Array.isArray(domShortcodes) && domShortcodes.length > allPosts.length))) {
       const sourceShortcodes = (Array.isArray(domShortcodes) && domShortcodes.length) ? domShortcodes : (Array.isArray(gridShortcodes) && gridShortcodes.length ? gridShortcodes : []);
       if (sourceShortcodes.length) {
         dbg('[recovery] no post objects captured - rebuilding from shortcodes', sourceShortcodes.length);
