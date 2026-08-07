@@ -535,10 +535,60 @@ async function buildPostsFromShortcodes(shortcodes = [], limit = 50, options = {
         const fetchUrl = `${IG_BASE}/p/${code}/`;
         const response = await page.goto(fetchUrl, { waitUntil: 'networkidle2', timeout: 20000 });
         lastHtml = await response.text();
+        // Instagram ya no sirve JSON en __a=1: el post va embebido en la página.
+        // Extraerlo del DOM (window._sharedData / __additionalDataLoaded / scripts json).
+        try {
+          const embedded = await page.evaluate(new Function('targetCode', `
+            function hasMedia(o) {
+              return !!(o && (o.image_versions2 || o.carousel_media || o.video_versions || o.media_type));
+            }
+            function findPost(obj, code) {
+              if (!obj || typeof obj !== 'object') return null;
+              if ((obj.code === code || obj.shortcode === code) && hasMedia(obj)) return obj;
+              if (Array.isArray(obj)) {
+                for (const x of obj) { const r = findPost(x, code); if (r) return r; }
+                return null;
+              }
+              for (const k in obj) {
+                if (k === 'logging_info_token' || k === 'carousel_media') continue;
+                const r = findPost(obj[k], code);
+                if (r) return r;
+              }
+              return null;
+            }
+            if (window.__additionalDataLoaded) {
+              for (const key of Object.keys(window.__additionalDataLoaded)) {
+                const r = findPost(window.__additionalDataLoaded[key], targetCode);
+                if (r) return r;
+              }
+            }
+            if (window._sharedData) {
+              const r = findPost(window._sharedData, targetCode);
+              if (r) return r;
+            }
+            const scripts = Array.from(document.querySelectorAll('script[type="application/json"]'));
+            for (const s of scripts) {
+              try {
+                const j = JSON.parse(s.textContent);
+                const r = findPost(j, targetCode);
+                if (r) return r;
+              } catch (e) {}
+            }
+            return null;
+          `), code);
+          if (embedded) {
+            json = { items: [embedded] };
+            dbg('[rebuild] extracted embedded post for', code);
+          } else {
+            dbg('[rebuild] no embedded post found for', code);
+          }
+        } catch (e) { dbg('[rebuild] embedded json extraction error:', e.message); }
         if (prevUrl && prevUrl.includes('instagram.com')) {
           await page.goto(prevUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
         }
-        throw new Error(t('noJsonPayload'));
+        if (!json) {
+          throw new Error(t('noJsonPayload'));
+        }
       }
 
       if (options.debug) {
@@ -769,7 +819,7 @@ async function navigateAndCapture(username, options = {}) {
       if (elapsed - lastScroll >= 3000) {
         try {
           // Scroll ALL containers to bottom activa el lazy load de Instagram
-          await page.evaluate(() => {
+          await page.evaluate(new Function(`
             const scrollToBottom = (el) => { el.scrollTop = el.scrollHeight; };
             scrollToBottom(window);
             if (document.scrollingElement) scrollToBottom(document.scrollingElement);
@@ -780,7 +830,7 @@ async function navigateAndCapture(username, options = {}) {
                 if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 50) scrollToBottom(el);
               } catch(e) {}
             });
-          });
+          `));
           try { await page.keyboard.press('End'); } catch(e) {}
           dbg('[capture] scrolling to force feed load...');
         } catch (e) {}
@@ -1150,7 +1200,7 @@ async function scrollForMorePosts(existingPosts, limit, progressSpin) {
       }
 
       // Scroll ALL containers to bottom: Instagram virtual scroller solo carga al llegar al fondo
-      await page.evaluate(() => {
+      await page.evaluate(new Function(`
         const scrollToBottom = (el) => { el.scrollTop = el.scrollHeight; };
         scrollToBottom(window);
         if (document.scrollingElement) scrollToBottom(document.scrollingElement);
@@ -1162,7 +1212,7 @@ async function scrollForMorePosts(existingPosts, limit, progressSpin) {
             if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 50) scrollToBottom(el);
           } catch(e) {}
         });
-      }).catch(e => { dbg('[scroll] scroll evaluate failed:', (e && e.message) || e); });
+      `)).catch(e => { dbg('[scroll] scroll evaluate failed:', (e && e.message) || e); });
       // Also press End key as native trigger for lazy load
       try { await page.keyboard.press('End'); } catch(e) { dbg('[scroll] keyboard End failed:', e && e.message); }
       await sleep(3500);
@@ -1170,7 +1220,7 @@ async function scrollForMorePosts(existingPosts, limit, progressSpin) {
       // Diagnostic: qué contenedores hay y su estado
       if (i === 0) {
         try {
-          const diag = await page.evaluate(() => {
+          const diag = await page.evaluate(new Function(`
             const containers = [];
             document.querySelectorAll('[role="feed"], main, article, [role="presentation"], *').forEach(el => {
               try {
@@ -1182,7 +1232,7 @@ async function scrollForMorePosts(existingPosts, limit, progressSpin) {
               } catch(e) {}
             });
             return containers.slice(0, 5);
-          });
+          `));
           dbg('[scroll] scrollable containers:', JSON.stringify(diag));
         } catch(e) { dbg('[scroll] diag failed:', e && e.message); }
       }
@@ -1190,10 +1240,10 @@ async function scrollForMorePosts(existingPosts, limit, progressSpin) {
       // Extract DOM shortcodes para detectar carga aunque no lleguen API responses
       let domAdded = 0;
       try {
-        const domCodes = await page.evaluate(() => {
+        const domCodes = await page.evaluate(new Function(`
           const codes = new Set();
           document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]').forEach(a => {
-            const m = (a.getAttribute('href') || '').match(/\/(p|reel)\/([^\/?#]+)/);
+            const m = (a.getAttribute('href') || '').match(/\\/(p|reel)\\/([^\\/?#]+)/);
             if (m && m[2]) codes.add(m[2]);
           });
           document.querySelectorAll('[data-shortcode]').forEach(el => {
@@ -1201,7 +1251,7 @@ async function scrollForMorePosts(existingPosts, limit, progressSpin) {
             if (c) codes.add(c);
           });
           return Array.from(codes);
-        });
+        `));
         const unseenCodes = domCodes.filter(c => !imgSeen.has(c));
         domAdded = unseenCodes.length;
         unseenCodes.forEach(c => imgSeen.add(c));
